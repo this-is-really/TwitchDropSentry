@@ -14,8 +14,7 @@ pub async fn client_new (oauth: Option<&String>) -> Result<Client, Box<dyn Error
     };
     let uuid = Uuid::new_v4().to_string();
     let mut headers = HeaderMap::new();
-    headers.insert("Client-Integrity", HeaderValue::from_str(&uuid)?);
-    headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_str("en-EN")?);
+    headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_str("en-US")?);
     headers.insert("X-Device-Id", HeaderValue::from_str(&uuid)?);
     headers.insert("Client-Version", HeaderValue::from_str(&uuid)?);
     headers.insert("Client-Session-Id", HeaderValue::from_str(&uuid)?);

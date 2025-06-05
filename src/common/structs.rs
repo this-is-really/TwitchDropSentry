@@ -35,3 +35,9 @@ pub struct Token {
     pub userid: String,
     pub oauth: String,
 }
+
+pub struct Campaigns {
+    pub game_display_name: String,
+    pub game_id: String,
+    pub campaign_id: String,
+}

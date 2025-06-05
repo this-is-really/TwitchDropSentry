@@ -1,65 +1,64 @@
-use std::{error::Error, time::Duration};
+use std::{collections::HashMap, error::Error, io};
 
-use reqwest::{header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE, USER_AGENT}, Client};
-use serde_json::Value;
-use tokio::time::sleep;
+use dialoguer::Select;
 
-use crate::{client::client_new, common::structs::{ClientInfo, GQLoperation}, token::get_token};
+
+use crate::{api::{device_flow_auth, list_active_games}, client::client_new, token::{check_token, load_or_create_token}};
 mod common;
 mod client;
 mod token;
-
-const GQL_ENDPOINT: &'static str = "https://gql.twitch.tv/gql";
+mod api;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let client = client_new(None).await?;
-    let auth = device_flow_auth(&client).await?;
-    let token = get_token(&auth.0, &auth.1).await?;
-    let client = client_new(Some(&auth.1)).await?;
+    let dialogs = vec!["Add a twitch account", "Start farming", "Exit"];
+    loop {
+        let dialog = Select::new().with_prompt("== Main Menu ==").items(&dialogs).default(0).interact()?;
+        match dialog {
+            0 => {
+                if let Err(e) = auth().await {
+                    eprintln!("[Auth Error] {}", e)
+                }
+            },
+            1 => {
+                if let Err(e) = farm().await {
+                    eprintln!("[Farm Error] {}", e)
+                }
+            },
+            2 => break,
+            _ => return Err("Unexpected error")?
+        }  
+    }
+    
     Ok(())
 }
 
-async fn device_flow_auth (client: &Client) -> Result<(String, String), Box<dyn Error>> {
-    let client_info = ClientInfo::android().await?;
-    println!("Requesting authorization via Device Flow...");
-    let payload = [
-        ("client_id", client_info.id.as_str()),
-        ("scope", "user_read")
-    ];
-    let response = client.post("https://id.twitch.tv/oauth2/device").form(&payload).send().await?;
-    let json: Value = response.json().await?;
-    if let Some(message) = json.get("message") {
-        return Err(format!("Authorization error: {}", message))?;
-    };
-
-    let user_code = &json["user_code"].as_str().ok_or("Missing user_code field in response")?;
-    let device_code = &json["device_code"].as_str().ok_or("The device_code field is missing in the response")?;
-    let verification_url = &json["verification_uri"].as_str().ok_or("Missing verification_uri field in response")?;
-    println!("Go to: {} and enter the code: {}", verification_url, user_code);
-    println!("We are waiting for confirmation...");
-    let data = [
-        ("client_id", client_info.id.as_str()),
-        ("device_code", device_code),
-        ("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
-    ];
-    loop {
-        sleep(Duration::from_secs(5)).await;
-        let token_response = client.post("https://id.twitch.tv/oauth2/token").form(&data).send().await?;
-        let json: Value = token_response.json().await?;
-        if let Some(acces_token) = json.get("access_token").and_then(|v| v.as_str()) {
-            let inventory_form = GQLoperation::inventory(false).await?;
-            let mut invnetory_headers = HeaderMap::new();
-            invnetory_headers.insert("Client-ID", HeaderValue::from_str("kimne78kx3ncx6brgo4mv6wki5h1ko")?);
-            invnetory_headers.insert(CONTENT_TYPE, HeaderValue::from_str("application/json")?);
-            invnetory_headers.insert(USER_AGENT, HeaderValue::from_str("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")?);
-            invnetory_headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("OAuth {}", acces_token))?);
-            let inventory = client.post(GQL_ENDPOINT).headers(invnetory_headers).json(&inventory_form).send().await?;
-            let inventory_json: Value = inventory.json().await?;
-            if let Some(data) = inventory_json.get("data") {
-                let user_id = &data.get("currentUser").and_then(|v| v.get("id")).and_then(|v| v.as_str()).ok_or("Missing user_id field in response")?;
-                return Ok((user_id.to_string(), acces_token.to_string()));
-            }
-        }
-    }
+async fn auth () -> Result<(), Box<dyn Error>> {
+    let client = client_new(None).await?;
+    let auth = device_flow_auth(&client).await?;
+    load_or_create_token(&auth.0, &auth.1).await?;
+    Ok(())
 }
+
+async fn farm () -> Result<(), Box<dyn Error>> {
+    if check_token().await? == false {
+        return Err("Register first")?;
+    }
+    let load_token = load_or_create_token(&"".to_string(), &"".to_string()).await?;
+    let client = client_new(Some(&load_token.oauth)).await?;
+    let campaigns = list_active_games(&client).await?;
+    let mut hash = HashMap::new();
+    for (i, campaign) in campaigns.iter().enumerate() {
+        println!("{}: {}", i+1, campaign.game_display_name);
+        hash.insert(i + 1, campaign);
+    }
+    let mut select = String::new();
+    println!("Select a campaign");
+    io::stdin().read_line(&mut select)?;
+    let select = select.trim().parse::<usize>()?;
+    if let Some(company) = hash.get(&select) {
+        println!("You chose: {}", company.game_display_name)
+    }
+    Ok(())
+}
+
