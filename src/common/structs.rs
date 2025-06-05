@@ -30,3 +30,8 @@ pub struct PersistedQuery {
     pub sha256Hash: String,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Token {
+    pub userid: String,
+    pub oauth: String,
+}

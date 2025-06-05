@@ -1,39 +1,33 @@
-use std::{error::Error, thread, time::Duration};
+use std::{error::Error, time::Duration};
 
-use reqwest::{header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE, ORIGIN, REFERER, USER_AGENT}, Client};
-use serde_json::{json, Value};
+use reqwest::{header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE, USER_AGENT}, Client};
+use serde_json::Value;
 use tokio::time::sleep;
-use uuid::Uuid;
 
-use crate::common::structs::{ClientInfo, GQLoperation};
+use crate::{client::client_new, common::structs::{ClientInfo, GQLoperation}, token::get_token};
 mod common;
+mod client;
+mod token;
 
 const GQL_ENDPOINT: &'static str = "https://gql.twitch.tv/gql";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let client = Client::new();
+    let client = client_new(None).await?;
     let auth = device_flow_auth(&client).await?;
-    println!("{} | {}", auth.0, auth.1);
+    let token = get_token(&auth.0, &auth.1).await?;
+    let client = client_new(Some(&auth.1)).await?;
     Ok(())
 }
 
 async fn device_flow_auth (client: &Client) -> Result<(String, String), Box<dyn Error>> {
     let client_info = ClientInfo::android().await?;
-    let mut headers = HeaderMap::new();
-    let device_id = Uuid::new_v4().to_string();
-    headers.insert(ACCEPT, HeaderValue::from_str("application/json")?);
-    headers.insert("Client-Id", HeaderValue::from_str(&client_info.id)?);
-    headers.insert(ORIGIN, HeaderValue::from_str(&client_info.url)?);
-    headers.insert(REFERER, HeaderValue::from_str(&client_info.url)?);
-    headers.insert(USER_AGENT, HeaderValue::from_str(&client_info.user_agent)?);
-    headers.insert("X-Device-Id", HeaderValue::from_str(&device_id)?);
     println!("Requesting authorization via Device Flow...");
     let payload = [
         ("client_id", client_info.id.as_str()),
         ("scope", "user_read")
     ];
-    let response = client.post("https://id.twitch.tv/oauth2/device").headers(headers.clone()).form(&payload).send().await?;
+    let response = client.post("https://id.twitch.tv/oauth2/device").form(&payload).send().await?;
     let json: Value = response.json().await?;
     if let Some(message) = json.get("message") {
         return Err(format!("Authorization error: {}", message))?;
@@ -51,7 +45,7 @@ async fn device_flow_auth (client: &Client) -> Result<(String, String), Box<dyn 
     ];
     loop {
         sleep(Duration::from_secs(5)).await;
-        let token_response = client.post("https://id.twitch.tv/oauth2/token").headers(headers.clone()).form(&data).send().await?;
+        let token_response = client.post("https://id.twitch.tv/oauth2/token").form(&data).send().await?;
         let json: Value = token_response.json().await?;
         if let Some(acces_token) = json.get("access_token").and_then(|v| v.as_str()) {
             let inventory_form = GQLoperation::inventory(false).await?;
