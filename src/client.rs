@@ -6,12 +6,7 @@ use uuid::Uuid;
 use crate::common::structs::ClientInfo;
 
 pub async fn client_new (oauth: Option<&String>) -> Result<Client, Box<dyn Error>> {
-    let client = rand::random_range(0..=1);
-    let client = match client {
-        0 => ClientInfo::android().await?,
-        1 => ClientInfo::web().await?,
-        _ => unreachable!("Unexpected random value")
-    };
+    let client = ClientInfo::android().await?;
     let uuid = Uuid::new_v4().to_string();
     let mut headers = HeaderMap::new();
     headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_str("en-US")?);
