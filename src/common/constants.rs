@@ -71,7 +71,7 @@ impl GQLoperation {
         Ok(info)
     }
 
-    pub async fn campaigndetails (user_login: &String, dropid: &i64) -> Result<Self, Box<dyn Error>> {
+    pub async fn campaigndetails (user_login: &String, dropid: &String) -> Result<Self, Box<dyn Error>> {
         let variables = json!({
             "channelLogin": user_login,
             "dropID": dropid,
@@ -132,7 +132,7 @@ impl GQLoperation {
                 "includeRestricted": ["SUB_ONLY_LIVE"],
                 "recommendationsContext": {"platform": "web"},
                 "sort": "RELEVANCE",
-                "systemFilters": [],
+                "systemFilters": ["DROPS_ENABLED"],
                 "tags": [],
                 "requestID": "JIRA-VXP-2397",
             },
@@ -149,7 +149,7 @@ impl GQLoperation {
         Ok(info)
     }
 
-    async fn slugredirect (game_name: &String) -> Result<Self, Box<dyn Error>> {
+    pub async fn slugredirect (game_name: &String) -> Result<Self, Box<dyn Error>> {
         let variables = json!({
             "name": game_name
         });

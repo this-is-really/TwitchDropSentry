@@ -1,13 +1,21 @@
-use std::{collections::HashMap, error::Error, io};
+use std::{collections::HashMap, error::Error, io::{self, Write}};
 
 use dialoguer::Select;
+use serde_json::Value;
 
 
-use crate::{api::{device_flow_auth, list_active_games}, client::client_new, token::{check_token, load_or_create_token}};
+use crate::{api::{device_flow_auth, get_campaign_details, get_playback_token, get_slug, list_active_games, watch_stream, GQL_ENDPOINT}, client::client_new, common::structs::{Channel, GQLoperation}, token::{check_token, load_or_create_token}};
 mod common;
 mod client;
 mod token;
 mod api;
+
+struct CompanyInfo {
+    game_display_name: String,
+    game_id: String,
+    campaign_id: String,
+}
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -52,13 +60,82 @@ async fn farm () -> Result<(), Box<dyn Error>> {
         println!("{}: {}", i+1, campaign.game_display_name);
         hash.insert(i + 1, campaign);
     }
-    let mut select = String::new();
-    println!("Select a campaign");
-    io::stdin().read_line(&mut select)?;
-    let select = select.trim().parse::<usize>()?;
-    if let Some(company) = hash.get(&select) {
-        println!("You chose: {}", company.game_display_name)
+    let mut company_info = CompanyInfo { 
+        game_display_name: "".to_string(), 
+        game_id: "".to_string(), 
+        campaign_id: "".to_string() 
+    };
+    loop {
+        let mut select = String::new();
+        print!("Select a campaign: ");
+        io::stdout().flush()?;
+        io::stdin().read_line(&mut select)?;
+        match select.trim().parse::<usize>() {
+            Ok(num) => {
+                if let Some(company) = hash.get(&num) {
+                    println!("You chose: {}", company.game_display_name);
+                    company_info = CompanyInfo {
+                        game_display_name: company.game_display_name.to_string(),
+                        game_id: company.game_id.to_string(),
+                        campaign_id: company.campaign_id.to_string(),
+                    };
+                    break;
+                } else {
+                    println!("Invalid number. Try again.");
+                }
+            }
+            Err(_) => println!("Please enter a valid number."),
+        } 
+        
     }
+
+    let campaign_details = get_campaign_details(&client, &load_token.userid, &company_info.campaign_id).await?;
+    let mut active_streams = Vec::new();
+    let allow = campaign_details.data.user.dropCampaign.allow;
+    match allow.channels {
+        Some(channels) => {
+            for channel in channels {
+                active_streams.push(channel);
+            }
+        },
+        None => {
+            let game_slug = get_slug(&client, &company_info.game_display_name).await?;
+            let game_directory = GQLoperation::gamedirectory(&game_slug).await?;
+            let response = client.post(GQL_ENDPOINT).json(&game_directory).send().await?;
+            let json: Value = response.json().await?;
+            if let Some(edges) = json.get("data").and_then(|d| d.get("game")).and_then(|g| g.get("streams")).and_then(|s| s.get("edges")).and_then(|e| e.as_array()) {
+                for edge in edges {
+                    if let Some(broadcaster) = edge.get("node").and_then(|n| n.get("broadcaster")) {
+                        let id = broadcaster.get("id").and_then(Value::as_str).unwrap_or_default().to_string();
+                        let display_name = broadcaster.get("displayName").and_then(Value::as_str).unwrap_or_default().to_string();
+                        let login = broadcaster.get("login").and_then(Value::as_str).unwrap_or_default().to_string();
+                        let chan = Channel {
+                            id: id,
+                            displayName: display_name,
+                            name: login,
+                        };
+                        active_streams.push(chan);
+                    }
+                }
+        }   else {
+                return Err("There is no field data.game.streams.edges in the response or it is not an array")?;
+            }
+        },
+    }
+    let mut drop_times = campaign_details.data.user.dropCampaign.timeBasedDrops;
+    drop_times.sort_by_key(|s| s.requiredMinutesWatched);
+    let mut filter_drops_map = HashMap::new();
+    for (i, drop) in drop_times.iter().enumerate() {
+        filter_drops_map.insert(i + 1, drop);
+    };
+    let playback_token = get_playback_token(&client, &active_streams.first().map(|s| s.name.clone()).unwrap()).await?;
+    let _stream = tokio::spawn({
+        async move {
+            if let Err(e) = watch_stream(&active_streams.first().map(|s| s.name.clone()).unwrap(), &playback_token.0, &playback_token.1).await {
+                println!("Error watching stream: {}", e)
+            }
+        }
+    });
     Ok(())
 }
 

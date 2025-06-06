@@ -1,8 +1,9 @@
+use rand::random_range;
 use serde_json::Value;
 use tokio::time::sleep;
 use std::{error::Error, time::Duration};
-use reqwest::{header::{HeaderValue, AUTHORIZATION}, Client};
-use crate::common::structs::{Campaigns, ClientInfo, GQLoperation};
+use reqwest::{header::{HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT}, Client};
+use crate::{common::structs::{ApiResponse, Campaigns, ClientInfo, GQLoperation}};
 
 pub const GQL_ENDPOINT: &'static str = "https://gql.twitch.tv/gql";
 
@@ -40,6 +41,8 @@ pub async fn device_flow_auth (client: &Client) -> Result<(String, String), Box<
             if let Some(data) = inventory_json.get("data") {
                 let user_id = &data.get("currentUser").and_then(|v| v.get("id")).and_then(|v| v.as_str()).ok_or("Missing user_id field in response")?;
                 return Ok((user_id.to_string(), acces_token.to_string()));
+            } else {
+                return Err("Didn't find inventory data")?;
             }
         }
     }
@@ -63,4 +66,86 @@ pub async fn list_active_games (client: &Client) -> Result<Vec<Campaigns>, Box<d
         active_games.push(games);
     }
     Ok(active_games)
+}
+
+pub async fn get_campaign_details (client: &Client, user_id: &String, campaign_id: &String) -> Result<ApiResponse, Box<dyn Error>> {
+    let campaign_details_form = GQLoperation::campaigndetails(&user_id, &campaign_id).await?;
+    let campaign_details = client.post(GQL_ENDPOINT).json(&campaign_details_form).send().await?;
+    let campaign_answer: Value = campaign_details.json().await?;
+    if let Some(_) = campaign_answer.get("data") {
+        let answer: ApiResponse = serde_json::from_value(campaign_answer)?;
+        return Ok(answer)
+    } else {
+        return Err("No data received from GQL response")?;
+    }
+}
+
+pub async fn get_slug (client: &Client, game_name: &String) -> Result<String, Box<dyn Error>> {
+    let slug = GQLoperation::slugredirect(&game_name).await?;
+    let response = client.post(GQL_ENDPOINT).json(&slug).send().await?;
+    let json: Value = response.json().await?;
+    let mut slug_str = String::new();
+    if let Some(data) = json.get("data") {
+        let slug = data.get("game").and_then(|s| s.get("slug")).and_then(|s| s.as_str()).ok_or("Didn't find slug")?;
+        slug_str.push_str(slug);
+    } else {
+        return Err("No data received from GQL response")?;
+    }
+    Ok(slug_str)
+}
+
+pub async fn get_playback_token (client: &Client,channel_login: &String) -> Result<(String, String), Box<dyn Error>> {
+    let playback_token = GQLoperation::playbackaccesstoken(channel_login).await?;
+    let response = client.post(GQL_ENDPOINT).json(&playback_token).send().await?;
+    let json: Value = response.json().await?;
+    let mut value_str = String::new();
+    let mut signature_str = String::new();
+    if let Some(data) = json.get("data") {
+        if let Some(stream_playback) = data.get("streamPlaybackAccessToken") {
+            let value = stream_playback.get("value").and_then(|s| s.as_str()).ok_or("Didn't find token value")?;
+            value_str.push_str(&value.to_string());
+            let signature = stream_playback.get("signature").and_then(|s| s.as_str()).ok_or("Token signature not found")?;
+            signature_str.push_str(&signature.to_string());
+        } else {
+            return Err("There is no data.streamPlaybackAccessToken field in the response or it is not an array")?;
+        }
+    } else {
+        return Err("Didn't find data in DirectoryPage_Game")?;
+    }
+    Ok((value_str, signature_str))
+}
+
+pub async fn watch_stream (channel_login: &String, token_value: &String, token_signature: &String) -> Result<(), Box<dyn Error>> {
+    let client = Client::new();
+    println!("{}", token_signature);
+    let url = format!("https://usher.ttvnw.net/api/channel/hls/{}.m3u8?sig={}&token={}&allow_source=true&player_backend=mediaplayer&playlist_include_framerate=true", channel_login, token_signature, token_value);
+    let info_client_rand = random_range(0..=1);
+    let info_client = match info_client_rand {
+        0 => ClientInfo::android().await?,
+        1 => ClientInfo::web().await?,
+        _ => unreachable!()
+    };
+    let response = client.get(&url).header(USER_AGENT, HeaderValue::from_str(&info_client.user_agent)?).header(ACCEPT, HeaderValue::from_str("application/json")?).timeout(std::time::Duration::from_secs(45)).send().await?;
+    println!("{}", response.url());
+    if ! response.status().is_success() {
+        return Err(format!("Error getting playlist, status: {}", response.status()))?
+    }
+    let mut stream = response.bytes_stream();
+
+    use tokio_stream::StreamExt;
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(chunk_lock) => {
+                if chunk_lock.is_empty() {
+                    break;
+                }
+                println!("Received chunk of size {} bytes", chunk_lock.len())
+            }
+            Err(e) => {
+                println!("Error reading stream: {}", e);
+                break;
+            }
+        }
+    }
+    Ok(())
 }
