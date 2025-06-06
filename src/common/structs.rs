@@ -76,6 +76,7 @@ pub struct DropCampaign {
     pub allow: AllowList,
 }
 
+// DropCampaign
 #[allow(non_snake_case)]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Game {
@@ -84,6 +85,8 @@ pub struct Game {
     pub displayName: String,
 }
 
+
+// DropCampaign
 #[allow(non_snake_case)]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TimeBasedDrop {
@@ -91,6 +94,7 @@ pub struct TimeBasedDrop {
     pub benefitEdges: Vec<BenefitEdge>,
 }
 
+// TimeBasedDrop
 #[allow(non_snake_case)]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BenefitEdge {
@@ -101,6 +105,14 @@ pub struct BenefitEdge {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Benefit {
     pub id: String,
+    pub game: BenefitGame,
+    pub name: String
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BenefitGame {
+    id: String,
+    name: String
 }
 
 #[allow(non_snake_case)]

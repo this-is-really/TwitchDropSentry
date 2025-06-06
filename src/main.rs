@@ -4,7 +4,7 @@ use dialoguer::Select;
 use serde_json::Value;
 
 
-use crate::{api::{device_flow_auth, get_campaign_details, get_playback_token, get_slug, list_active_games, watch_stream, GQL_ENDPOINT}, client::client_new, common::structs::{Channel, GQLoperation}, token::{check_token, load_or_create_token}};
+use crate::{api::{device_flow_auth, get_campaign_details, get_playback_token, get_slug, list_active_games, watch_stream, websockets_connections, GQL_ENDPOINT}, client::client_new, common::structs::{Channel, GQLoperation}, token::{check_token, load_or_create_token}};
 mod common;
 mod client;
 mod token;
@@ -130,12 +130,22 @@ async fn farm () -> Result<(), Box<dyn Error>> {
     };
     let playback_token = get_playback_token(&client, &active_streams.first().map(|s| s.name.clone()).unwrap()).await?;
     let _stream = tokio::spawn({
+        let first_stream_name = active_streams.first().map(|s| s.name.clone()).unwrap().clone();
         async move {
-            if let Err(e) = watch_stream(&active_streams.first().map(|s| s.name.clone()).unwrap(), &playback_token.0, &playback_token.1).await {
+            let client = client.clone();
+            if let Err(e) = watch_stream(&client, &first_stream_name, &playback_token.0, &playback_token.1).await {
                 println!("Error watching stream: {}", e)
             }
         }
     });
+    let _websocket = tokio::spawn({
+        async move {
+            if let Err(e) = websockets_connections(&load_token.oauth, &load_token.userid, &active_streams.first().map(|s| s.id.clone()).unwrap()).await {
+                println!("Websocket error: {}", e)
+            }
+        }
+    });
+    let first_drop = filter_drops_map.get(&1).ok_or("Didn't find the first drop")?;
     Ok(())
 }
 
