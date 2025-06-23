@@ -27,7 +27,7 @@ impl ClientInfo {
 }
 
 impl GQLoperation {
-    pub async fn get_stream_info (channel_login: &String) -> Result<Self, Box<dyn Error>> {
+    pub async fn get_stream_info (channel_login: &String) -> Result<Self, Box<dyn Error + Sync + Send>> {
         let variables = json!({
             "channel": channel_login
         });

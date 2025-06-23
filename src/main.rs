@@ -1,10 +1,11 @@
-use std::{collections::HashMap, error::Error, io::{self, Write}};
+use std::{collections::HashMap, error::Error, io::{self, Write}, time::Duration};
 
 use dialoguer::Select;
 use serde_json::Value;
+use tokio::time::sleep;
 
 
-use crate::{api::{device_flow_auth, get_campaign_details, get_playback_token, get_slug, list_active_games, watch_stream, websockets_connections, GQL_ENDPOINT}, client::client_new, common::structs::{Channel, GQLoperation}, token::{check_token, load_or_create_token}};
+use crate::{api::{check_online, device_flow_auth, get_campaign_details, get_playback_token, get_slug, list_active_games, watch_stream, GQL_ENDPOINT}, client::client_new, common::structs::{Channel, GQLoperation}, token::{check_token, load_or_create_token}};
 mod common;
 mod client;
 mod token;
@@ -128,21 +129,39 @@ async fn farm () -> Result<(), Box<dyn Error>> {
     for (i, drop) in drop_times.iter().enumerate() {
         filter_drops_map.insert(i + 1, drop);
     };
-    let playback_token = get_playback_token(&client, &active_streams.first().map(|s| s.name.clone()).unwrap()).await?;
+    
     let _stream = tokio::spawn({
-        let first_stream_name = active_streams.first().map(|s| s.name.clone()).unwrap().clone();
-        async move {
-            let client = client.clone();
-            if let Err(e) = watch_stream(&client, &first_stream_name, &playback_token.0, &playback_token.1).await {
-                println!("Error watching stream: {}", e)
+        let active_streams_clone = active_streams.clone();
+        let client = client.clone();
+        async move {   
+            for stream in active_streams_clone {
+                let playback_token = match get_playback_token(&client, &stream.name).await {
+                    Ok(token) => token,
+                    Err(e) => {
+                        println!("{e}");
+                        continue;
+                    }
+                };
+                match watch_stream(&client, &stream.name, &playback_token.0, &playback_token.1).await {
+                    Ok(_) => {
+                        println!("Successfully connected to the stream");
+                        loop {
+                           match check_online(&client, &stream.name).await {
+                                Ok(_) => sleep(Duration::from_secs(30)).await,
+                                Err(e) => {
+                                    println!("{e}");
+                                    break;
+                                }
+                            } 
+                        }
+                    },
+                    Err(e) => {
+                        println!("{e}");
+                        sleep(Duration::from_secs(3)).await;
+                    }
+                };
             }
-        }
-    });
-    let _websocket = tokio::spawn({
-        async move {
-            if let Err(e) = websockets_connections(&load_token.oauth, &load_token.userid, &active_streams.first().map(|s| s.id.clone()).unwrap()).await {
-                println!("Websocket error: {}", e)
-            }
+            
         }
     });
     let first_drop = filter_drops_map.get(&1).ok_or("Didn't find the first drop")?;

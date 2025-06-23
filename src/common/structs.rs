@@ -124,7 +124,7 @@ pub struct AllowList {
 }
 
 #[allow(non_snake_case)]
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Channel {
     pub id: String,
     pub displayName: String,
