@@ -1,7 +1,7 @@
 use serde_json::Value;
 use tokio::time::sleep;
 use std::{error::Error, time::Duration};
-use reqwest::{header::{HeaderValue, AUTHORIZATION}, Client};
+use reqwest::{header::{HeaderMap, HeaderValue, AUTHORIZATION, CONNECTION, USER_AGENT}, Client, Url};
 use crate::{common::structs::{ApiResponse, Campaigns, ClientInfo, GQLoperation}};
 
 pub const GQL_ENDPOINT: &'static str = "https://gql.twitch.tv/gql";
@@ -119,31 +119,24 @@ pub async fn get_playback_token (client: &Client,channel_login: &String) -> Resu
     Ok((value_str, signature_str))
 }
 
-pub async fn watch_stream (client: &Client, channel_login: &String, token_value: &String, token_signature: &String) -> Result<(), Box<dyn Error + Sync + Send>> {
+pub async fn watch_stream (channel_login: &String, token_value: &String, token_signature: &String) -> Result<(), Box<dyn Error + Sync + Send>> {
+    let mut headers = HeaderMap::new();
+    headers.insert(CONNECTION, HeaderValue::from_str("close")?);
+    headers.insert(USER_AGENT, HeaderValue::from_str("Mozilla/5.0 (X11; Linux x86_64; rv:139.0) Gecko/20100101 Firefox/139.0")?);
+    let client = Client::new();
     let url = format!("https://usher.ttvnw.net/api/channel/hls/{}.m3u8?sig={}&token={}&allow_source=true&player_backend=mediaplayer&playlist_include_framerate=true", channel_login, token_signature, token_value);
-    let playlist_response = client.get(&url).timeout(std::time::Duration::from_secs(45)).send().await?;
-    if ! playlist_response.status().is_success() {
-        return Err(format!("Error getting playlist, status: {}", playlist_response.status()))?
+    let base_url = Url::parse(&url)?;
+    loop {
+        let playlist = client.get(base_url.clone()).send().await?;
+        let playlist_text = playlist.text().await?;
+        let playlist_last = playlist_text.lines().last().unwrap();
+        let get_last = client.get(playlist_last).send().await?;
+        let last_text = get_last.text().await?;
+        let last = last_text.lines().last().unwrap();
+        client.head(last).send().await?;
+        sleep(Duration::from_secs(20)).await;
     }
-
-    let mut stream = playlist_response.bytes_stream();
-
-    use tokio_stream::StreamExt;
-    while let Some(chunk) = stream.next().await {
-        match chunk {
-            Ok(chunk_lock) => {
-                if chunk_lock.is_empty() {
-                    break;
-                }
-                println!("Received chunk of size {} bytes", chunk_lock.len())
-            }
-            Err(e) => {
-                println!("Error reading stream: {}", e);
-                break;
-            }
-        }
-    }
-    Ok(())
+    
 }
 
 pub async fn check_online (client: &Client, channel_login: &String) -> Result<(), Box<dyn Error + Sync + Send>> {

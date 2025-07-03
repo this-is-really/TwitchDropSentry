@@ -61,11 +61,7 @@ async fn farm () -> Result<(), Box<dyn Error>> {
         println!("{}: {}", i+1, campaign.game_display_name);
         hash.insert(i + 1, campaign);
     }
-    let mut company_info = CompanyInfo { 
-        game_display_name: "".to_string(), 
-        game_id: "".to_string(), 
-        campaign_id: "".to_string() 
-    };
+    let mut company_info: Option<CompanyInfo> = None;
     loop {
         let mut select = String::new();
         print!("Select a campaign: ");
@@ -75,11 +71,11 @@ async fn farm () -> Result<(), Box<dyn Error>> {
             Ok(num) => {
                 if let Some(company) = hash.get(&num) {
                     println!("You chose: {}", company.game_display_name);
-                    company_info = CompanyInfo {
+                    company_info = Some(CompanyInfo {
                         game_display_name: company.game_display_name.to_string(),
                         game_id: company.game_id.to_string(),
                         campaign_id: company.campaign_id.to_string(),
-                    };
+                    });
                     break;
                 } else {
                     println!("Invalid number. Try again.");
@@ -89,7 +85,7 @@ async fn farm () -> Result<(), Box<dyn Error>> {
         } 
         
     }
-
+    let company_info = company_info.expect("Company info must be set before this point");
     let campaign_details = get_campaign_details(&client, &load_token.userid, &company_info.campaign_id).await?;
     let mut active_streams = Vec::new();
     let allow = campaign_details.data.user.dropCampaign.allow;
@@ -142,29 +138,33 @@ async fn farm () -> Result<(), Box<dyn Error>> {
                         continue;
                     }
                 };
-                match watch_stream(&client, &stream.name, &playback_token.0, &playback_token.1).await {
-                    Ok(_) => {
-                        println!("Successfully connected to the stream");
-                        loop {
-                           match check_online(&client, &stream.name).await {
-                                Ok(_) => sleep(Duration::from_secs(30)).await,
-                                Err(e) => {
-                                    println!("{e}");
-                                    break;
-                                }
-                            } 
+                let watch_handle = tokio::spawn({
+                    let stream_name = stream.name.clone();
+                    async move {
+                        if let Err(e) = watch_stream(&stream_name, &playback_token.0, &playback_token.1).await {
+                            println!("{e}")
                         }
-                    },
-                    Err(e) => {
-                        println!("{e}");
-                        sleep(Duration::from_secs(3)).await;
                     }
-                };
+                });
+                loop {
+                    match check_online(&client, &stream.name).await {
+                        Ok(_) => {
+                            println!("Watch {}", stream.name);
+                            sleep(Duration::from_secs(45)).await;
+                        }
+                        Err(e) => {
+                            println!("{e}");
+                            watch_handle.abort();
+                            sleep(Duration::from_secs(3)).await;
+                            break;
+                        }
+                    }
+                }
             }
             
         }
     });
-    let first_drop = filter_drops_map.get(&1).ok_or("Didn't find the first drop")?;
+    let _first_drop = filter_drops_map.get(&1).ok_or("Didn't find the first drop")?;
     Ok(())
 }
 
