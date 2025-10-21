@@ -35,7 +35,7 @@ async fn main () -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let input: usize = dialoguer::Input::new().with_prompt("Выбери компанию").interact_text()?;
+    let input: usize = dialoguer::Input::new().with_prompt("Choose campaign").interact_text()?;
     if let Some(campaigns) = grouped.get(&input) {
         for campaign in campaigns {
             let campaign_details = client.get_campaign_details(&campaign.id).await?;
