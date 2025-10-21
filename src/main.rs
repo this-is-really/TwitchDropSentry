@@ -1,170 +1,117 @@
-use std::{collections::HashMap, error::Error, io::{self, Write}, time::Duration};
+use std::{collections::{BTreeMap, HashMap}, error::Error, path::Path, time::Duration};
 
-use dialoguer::Select;
-use serde_json::Value;
-use tokio::time::sleep;
-
-
-use crate::{api::{check_online, device_flow_auth, get_campaign_details, get_playback_token, get_slug, list_active_games, watch_stream, GQL_ENDPOINT}, client::client_new, common::structs::{Channel, GQLoperation}, token::{check_token, load_or_create_token}};
-mod common;
-mod client;
-mod token;
-mod api;
-
-struct CompanyInfo {
-    game_display_name: String,
-    game_id: String,
-    campaign_id: String,
-}
-
+use tokio::time::{sleep, Instant};
+use twitch_gql_rs::{client_type::ClientType, structs::DropCampaigns, TwitchClient};
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
-    let dialogs = vec!["Add a twitch account", "Start farming", "Exit"];
-    loop {
-        let dialog = Select::new().with_prompt("== Main Menu ==").items(&dialogs).default(0).interact()?;
-        match dialog {
-            0 => {
-                if let Err(e) = auth().await {
-                    eprintln!("[Auth Error] {}", e)
-                }
-            },
-            1 => {
-                if let Err(e) = farm().await {
-                    eprintln!("[Farm Error] {}", e)
-                }
-            },
-            2 => break,
-            _ => return Err("Unexpected error")?
-        }  
+async fn main () -> Result<(), Box<dyn Error>> {
+    let path = Path::new("save.json");
+    if !path.exists() {
+        let client_type = ClientType::android_app();
+        let mut client = TwitchClient::new(&client_type).await?;
+        client.auth().await?;
+        client.save_file(&path).await?;
     }
-    
-    Ok(())
-}
+    let client = TwitchClient::load_from_file(&path).await?;
+    let campaign = client.get_campaign().await?;
+    let campaign = campaign.dropCampaigns;
 
-async fn auth () -> Result<(), Box<dyn Error>> {
-    let client = client_new(None).await?;
-    let auth = device_flow_auth(&client).await?;
-    load_or_create_token(&auth.0, &auth.1).await?;
-    Ok(())
-}
+    let mut id_to_index = HashMap::new();
+    let mut grouped: BTreeMap<usize, Vec<DropCampaigns>> = BTreeMap::new();
+    let mut next_index: usize = 0;
+    for obj in campaign {
+        let idx = *id_to_index.entry(obj.game.id.clone()).or_insert_with(|| {
+            let i = next_index;
+            next_index += 1;
+            i
+        });
 
-async fn farm () -> Result<(), Box<dyn Error>> {
-    if check_token().await? == false {
-        return Err("Register first")?;
+        grouped.entry(idx).or_default().push(obj);
     }
-    let load_token = load_or_create_token(&"".to_string(), &"".to_string()).await?;
-    let client = client_new(Some(&load_token.oauth)).await?;
-    let campaigns = list_active_games(&client).await?;
-    let mut hash = HashMap::new();
-    for (i, campaign) in campaigns.iter().enumerate() {
-        println!("{}: {}", i+1, campaign.game_display_name);
-        hash.insert(i + 1, campaign);
+
+    for (id, obj) in &grouped {
+        for i in obj {
+            println!("{} | {}", id, i.game.displayName);
+        }
     }
-    let mut company_info: Option<CompanyInfo> = None;
-    loop {
-        let mut select = String::new();
-        print!("Select a campaign: ");
-        io::stdout().flush()?;
-        io::stdin().read_line(&mut select)?;
-        match select.trim().parse::<usize>() {
-            Ok(num) => {
-                if let Some(company) = hash.get(&num) {
-                    println!("You chose: {}", company.game_display_name);
-                    company_info = Some(CompanyInfo {
-                        game_display_name: company.game_display_name.to_string(),
-                        game_id: company.game_id.to_string(),
-                        campaign_id: company.campaign_id.to_string(),
-                    });
-                    break;
+
+    let input: usize = dialoguer::Input::new().with_prompt("Выбери компанию").interact_text()?;
+    if let Some(campaigns) = grouped.get(&input) {
+        for campaign in campaigns {
+            let campaign_details = client.get_campaign_details(&campaign.id).await?;
+            'time_based_loop: for time_based in campaign_details.timeBasedDrops {
+                let need_watch = time_based.requiredMinutesWatched;
+                let start_at = Instant::now();
+                let mut end_time = start_at + Duration::from_secs(need_watch * 60);
+                if let Some(channels) = &campaign_details.allow.channels {
+                    for channel in channels {
+                        let stream_info = client.get_stream_info(&channel.name).await?;
+                        if let Some(stream) = stream_info.stream {
+                            loop {
+                                let is_online = client.get_stream_info(&stream_info.login).await?;
+                                if let None = is_online.stream {
+                                    continue;
+                                };
+                                let get_progress = client.get_current_drop_progress_on_channel(&stream_info.login, &stream_info.id).await?;
+                                let elapsed = start_at.elapsed();
+                                if get_progress.currentMinutesWatched * 60 != end_time.saturating_duration_since(start_at + elapsed).as_secs() {
+                                    end_time -= Duration::from_secs(get_progress.currentMinutesWatched * 60);
+                                }
+                                if Instant::now() >= end_time {
+                                    let inventory = client.get_inventory().await?;
+                                    let current_campaign = inventory.inventory.dropCampaignsInProgress.iter().find(|s| s.id == campaign_details.id).unwrap();
+                                    let current_time_based = current_campaign.timeBasedDrops.iter().find(|s| s.id == time_based.id).unwrap();
+                                    if let Some(instanece_id) = &current_time_based.self_drop.dropInstanceID {
+                                        client.claim_drop(&instanece_id).await?;
+                                        continue 'time_based_loop;
+                                    } else {
+                                        sleep(Duration::from_secs(5)).await
+                                    }
+                                }
+                                match client.send_watch(&stream_info.login, &stream.id, &stream_info.id).await {
+                                    Ok(_) => sleep(Duration::from_secs(20)).await,
+                                    Err(e) => return Err(e)?
+                                }
+                            }
+                        } else {
+                            continue;
+                        }
+                    }
                 } else {
-                    println!("Invalid number. Try again.");
-                }
-            }
-            Err(_) => println!("Please enter a valid number."),
-        } 
-        
-    }
-    let company_info = company_info.expect("Company info must be set before this point");
-    let campaign_details = get_campaign_details(&client, &load_token.userid, &company_info.campaign_id).await?;
-    let mut active_streams = Vec::new();
-    let allow = campaign_details.data.user.dropCampaign.allow;
-    match allow.channels {
-        Some(channels) => {
-            for channel in channels {
-                active_streams.push(channel);
-            }
-        },
-        None => {
-            let game_slug = get_slug(&client, &company_info.game_display_name).await?;
-            let game_directory = GQLoperation::gamedirectory(&game_slug).await?;
-            let response = client.post(GQL_ENDPOINT).json(&game_directory).send().await?;
-            let json: Value = response.json().await?;
-            if let Some(edges) = json.get("data").and_then(|d| d.get("game")).and_then(|g| g.get("streams")).and_then(|s| s.get("edges")).and_then(|e| e.as_array()) {
-                for edge in edges {
-                    if let Some(broadcaster) = edge.get("node").and_then(|n| n.get("broadcaster")) {
-                        let id = broadcaster.get("id").and_then(Value::as_str).unwrap_or_default().to_string();
-                        let display_name = broadcaster.get("displayName").and_then(Value::as_str).unwrap_or_default().to_string();
-                        let login = broadcaster.get("login").and_then(Value::as_str).unwrap_or_default().to_string();
-                        let chan = Channel {
-                            id: id,
-                            displayName: display_name,
-                            name: login,
-                        };
-                        active_streams.push(chan);
-                    }
-                }
-        }   else {
-                return Err("There is no field data.game.streams.edges in the response or it is not an array")?;
-            }
-        },
-    }
-    let mut drop_times = campaign_details.data.user.dropCampaign.timeBasedDrops;
-    drop_times.sort_by_key(|s| s.requiredMinutesWatched);
-    let mut filter_drops_map = HashMap::new();
-    for (i, drop) in drop_times.iter().enumerate() {
-        filter_drops_map.insert(i + 1, drop);
-    };
-    
-    let _stream = tokio::spawn({
-        let active_streams_clone = active_streams.clone();
-        let client = client.clone();
-        async move {   
-            for stream in active_streams_clone {
-                let playback_token = match get_playback_token(&client, &stream.name).await {
-                    Ok(token) => token,
-                    Err(e) => {
-                        println!("{e}");
-                        continue;
-                    }
-                };
-                let watch_handle = tokio::spawn({
-                    let stream_name = stream.name.clone();
-                    async move {
-                        if let Err(e) = watch_stream(&stream_name, &playback_token.0, &playback_token.1).await {
-                            println!("{e}")
-                        }
-                    }
-                });
-                loop {
-                    match check_online(&client, &stream.name).await {
-                        Ok(_) => {
-                            println!("Watch {}", stream.name);
-                            sleep(Duration::from_secs(45)).await;
-                        }
-                        Err(e) => {
-                            println!("{e}");
-                            watch_handle.abort();
-                            sleep(Duration::from_secs(3)).await;
-                            break;
+                    let slug = client.get_slug(&campaign.game.displayName).await?;
+                    let streams = client.get_game_directory(&slug, true).await?;
+                    for stream in streams {
+                        loop {
+                            let is_online = client.get_stream_info(&stream.broadcaster.login).await?;
+                            if let None = is_online.stream {
+                                continue;
+                            };
+                            let get_progress = client.get_current_drop_progress_on_channel(&stream.broadcaster.login, &stream.broadcaster.id).await?;
+                            let elapsed = start_at.elapsed();
+                            if get_progress.currentMinutesWatched * 60 != end_time.saturating_duration_since(start_at + elapsed).as_secs() {
+                                end_time -= Duration::from_secs(get_progress.currentMinutesWatched * 60);
+                            }
+                            if Instant::now() >= end_time {
+                                let inventory = client.get_inventory().await?;
+                                let current_campaign = inventory.inventory.dropCampaignsInProgress.iter().find(|s| s.id == campaign_details.id).unwrap();
+                                let current_time_based = current_campaign.timeBasedDrops.iter().find(|s| s.id == time_based.id).unwrap();
+                                if let Some(instanece_id) = &current_time_based.self_drop.dropInstanceID {
+                                    client.claim_drop(&instanece_id).await?;
+                                    continue 'time_based_loop;
+                                } else {
+                                    sleep(Duration::from_secs(5)).await
+                                }
+                            }
+                            match client.send_watch(&stream.broadcaster.id, &stream.id, &stream.broadcaster.id).await {
+                                Ok(_) => sleep(Duration::from_secs(20)).await,
+                                Err(e) => return Err(e)?
+                            }
                         }
                     }
                 }
             }
             
         }
-    });
-    let _first_drop = filter_drops_map.get(&1).ok_or("Didn't find the first drop")?;
+    }
     Ok(())
 }
-
