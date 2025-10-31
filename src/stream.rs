@@ -1,6 +1,6 @@
 use std::{collections::{BinaryHeap, HashSet}, error::Error, sync::Arc, time::Duration};
 
-use tokio::sync::watch::Receiver;
+use tokio::sync::{Mutex, Notify, broadcast::{self, Sender}, watch::Receiver};
 
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
@@ -9,7 +9,7 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::debug;
 use twitch_gql_rs::{TwitchClient, structs::{Channels, DropCampaigns, GameDirectory}};
 
-use crate::{retry, r#static::{ALLOW_CHANNELS, CHANNEL_IDS, Channel, DEFAULT_CHANNELS, NOW_WATCHED, retry_backup}};
+use crate::{retry, r#static::{ALLOW_CHANNELS, CHANNEL_IDS, Channel, DEFAULT_CHANNELS, retry_backup}};
 
 const UPDATE_TIME: u64 = 15;
 const MAX_TOPICS: usize = 50;
@@ -204,33 +204,63 @@ impl PartialOrd for Priority {
     }
 }
 
-async fn send_now_watched (mut rx: Receiver<BinaryHeap<Priority>>) {
+async fn send_now_watched (mut rx: Receiver<BinaryHeap<Priority>>, tx_now_watch: broadcast::Sender<Channel>, notify: Arc<Notify>, tx_for_delete: tokio::sync::watch::Sender<Channel>) {
     tokio::spawn(async move {
         loop {
-            rx.changed().await.unwrap();
-            let watch = rx.borrow().clone();
-            let mut now_watch = NOW_WATCHED.lock().await;
-            if let Some(max) = watch.peek() {
-                debug!("Send: {}", max.name.channel_login);
-                *now_watch = Channel { channel_id: max.name.channel_id.to_string(), channel_login: max.name.channel_login.to_string() };
-                drop(now_watch);
-                debug!("Drop now watch")
-            } else {
-                *now_watch = Channel::default();
+            if let Ok(_) = rx.changed().await {
+                let watch = rx.borrow().clone();
+                    if let Some(max) = watch.peek() {
+                        debug!("Send: {}", max.name.channel_login);
+                        if let Err(e) = tx_now_watch.send(Channel { channel_id: max.name.channel_id.to_string(), channel_login: max.name.channel_login.to_string() }) {
+                            tracing::error!("{e}")
+                        };
+                        notify.notified().await;
+
+                        loop {
+                            if let Err(e) = tx_for_delete.send(max.name.clone()) {
+                                tracing::error!("{e}");
+                                sleep(Duration::from_secs(5)).await;
+                                continue;
+                            } else {
+                                break;
+                            }
+                        }
+
+                        sleep(Duration::from_secs(5)).await;
+                        continue;
+                    } else {
+                        sleep(Duration::from_secs(5)).await;
+                        continue;
+                    }  
+                
             }
+            
 
         }
 
     });
 }
 
-pub async fn update_stream (campaigns: Arc<Vec<DropCampaigns>>) {
+pub async fn update_stream (campaigns: Arc<Vec<DropCampaigns>>, tx_now_watch: Sender<Channel>, notify: Arc<Notify>) {
     tokio::spawn(async move {
         let mut heap: BinaryHeap<Priority> = BinaryHeap::new();
         let mut old_channel_ids: HashSet<Channel> = HashSet::new();
         let (tx, rx) = tokio::sync::watch::channel(BinaryHeap::new());
+        let (tx_for_delete, mut rx_for_delete) = tokio::sync::watch::channel(Channel::default());
 
-        send_now_watched(rx).await;
+        send_now_watched(rx, tx_now_watch, notify, tx_for_delete).await;
+
+        let channel_to_delete = Arc::new(Mutex::new(Channel::default()));
+        let channel_to_delete_clone = Arc::clone(&channel_to_delete);
+        tokio::spawn(async move {
+            loop {
+                if let Ok(_) = rx_for_delete.changed().await {
+                    let channel = rx_for_delete.borrow().clone();
+                    let mut lock = channel_to_delete.lock().await;
+                    *lock = channel
+                }
+            }
+        });
 
         loop {
             let channel_ids = CHANNEL_IDS.lock().await.clone();
@@ -243,8 +273,12 @@ pub async fn update_stream (campaigns: Arc<Vec<DropCampaigns>>) {
             }
 
             let added_channels: Vec<&Channel> = channel_ids.iter().filter(|id| !old_channel_ids.contains(id)).collect();
-            debug!("{:?}", added_channels);
-            let delete_channels: Vec<&Channel> = old_channel_ids.iter().filter(|id| !channel_ids.contains(id)).collect();
+            let mut delete_channels: Vec<&Channel> = old_channel_ids.iter().filter(|id| !channel_ids.contains(id)).collect();
+
+            let add_channel_to_delete = channel_to_delete_clone.lock().await;
+            if *add_channel_to_delete != Channel::default() {
+                delete_channels.push(&add_channel_to_delete);
+            }
 
             if !delete_channels.is_empty() {
                 let delete_set: HashSet<&Channel> = delete_channels.into_iter().collect();

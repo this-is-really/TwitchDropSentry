@@ -1653,9 +1653,8 @@ dependencies = [
 
 [[package]]
 name = "twitch-gql-rs"
-version = "0.1.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35749849be2c8b965820df6135d7c7033aa588deba33674bfb6e991fe7a1df6c"
+version = "0.1.9"
+source = "git+https://github.com/this-is-really/twitch-gql-rs.git?branch=main#fc9e6b6cd4cda5f231e502b16d9ecd4964abcc2e"
 dependencies = [
  "base64",
  "once_cell",
@@ -1671,7 +1670,7 @@ dependencies = [
 
 [[package]]
 name = "twitchdrops_miner"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dialoguer",
  "futures-util",

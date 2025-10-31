@@ -19,9 +19,7 @@ pub struct Channel {
 
 const MAX_ATTEMPTS: u32 = 3;
 
-pub static NOW_WATCHED: Lazy<Arc<Mutex<Channel>>> = Lazy::new(|| Arc::new(Mutex::new(Channel::default())));
-
-pub static DROP_CASH: Lazy<Arc<Mutex<Vec<String>>>> = Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
+pub static DROP_CASH: Lazy<Arc<Mutex<HashSet<String>>>> = Lazy::new(|| Arc::new(Mutex::new(HashSet::new())));
 
 pub static CHANNEL_IDS: Lazy<Arc<Mutex<HashSet<Channel>>>> = Lazy::new(|| Arc::new(Mutex::new(HashSet::new())));
 

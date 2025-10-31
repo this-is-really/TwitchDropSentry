@@ -1,15 +1,17 @@
-use std::{collections::{BTreeMap, HashMap}, error::Error, path::{Path, PathBuf}, sync::Arc, time::Duration};
+use std::{collections::{BTreeMap, HashMap, HashSet}, error::Error, path::{Path, PathBuf}, sync::Arc, time::Duration};
 
 use indicatif::{ProgressBar, ProgressStyle};
-use tokio::{fs, sync::watch::Sender, time::{Instant, sleep}};
-use tracing::{debug, info};
+use tokio::{fs, sync::{Notify, broadcast::{self, Receiver, error::{TryRecvError}}, watch::Sender}, time::{Instant, sleep}};
+use tracing::{info};
 use twitch_gql_rs::{TwitchClient, client_type::ClientType, structs::{DropCampaigns}};
 
-use crate::{r#static::{Channel, DROP_CASH, NOW_WATCHED, retry_backup}, stream::{filter_streams, update_stream}};
+use crate::{r#static::{Channel, DROP_CASH, retry_backup}, stream::{filter_streams, update_stream}};
 mod r#static;
 mod stream;
 
 const STREAM_SLEEP: u64 = 20;
+
+const MAX_COUNT: u64 = 3;
 
 async fn create_client (home_dir: &Path) -> Result<TwitchClient, Box<dyn Error>> {
     let path = home_dir.join("save.json");
@@ -65,18 +67,23 @@ async fn main_logic (client: Arc<TwitchClient>, grouped: BTreeMap<usize, Vec<Dro
     let input: usize = dialoguer::Input::new().with_prompt("Select game").interact_text()?;
     if let Some(current_campaigns) = grouped.get(&input) {
 
-        let (tx, mut rx) = tokio::sync::watch::channel(String::new());
+        let (tx_watch, mut rx_watch) = tokio::sync::watch::channel(String::new());
         let drop_campaigns = Arc::new(current_campaigns.clone());
         
         let drop_cash_dir = home_dir.join("cash.json");
 
-        watch_sync(client.clone()).await;
+        let (tx, rx1) = broadcast::channel(100);
+        let rx2 = tx.subscribe();
+
+        let notify = Arc::new(Notify::new());
+
+        watch_sync(client.clone(), rx1, notify.clone()).await;
         info!("Watch synchronization task has been successfully initiated");
-        drop_sync(client.clone(), tx, drop_cash_dir).await;
+        drop_sync(client.clone(), tx_watch, drop_cash_dir, rx2, notify.clone()).await;
         info!("Drop progress tracker is active");
         filter_streams(client.clone(), drop_campaigns.clone()).await;
         info!("Stream filtering has begun");
-        update_stream(drop_campaigns).await;
+        update_stream(drop_campaigns, tx, notify).await;
         info!("Stream priority updated");
 
         for campaign in current_campaigns {
@@ -98,8 +105,8 @@ async fn main_logic (client: Arc<TwitchClient>, grouped: BTreeMap<usize, Vec<Dro
             }
 
             loop {
-                rx.changed().await.unwrap();
-                let drop_id = rx.borrow();
+                rx_watch.changed().await.unwrap();
+                let drop_id = rx_watch.borrow();
                 if drop_id.is_empty() {
                     sleep(Duration::from_secs(10)).await;
                     continue;
@@ -117,18 +124,18 @@ async fn main_logic (client: Arc<TwitchClient>, grouped: BTreeMap<usize, Vec<Dro
     Ok(())
 }
 
-async fn watch_sync (client: Arc<TwitchClient>) {
+async fn watch_sync (client: Arc<TwitchClient>, mut rx: Receiver<Channel>, notify: Arc<Notify>) {
     tokio::spawn(async move {
         let mut old_stream_name = String::new();
         let mut stream_id = String::new();
-        loop {
-            let watching = NOW_WATCHED.lock().await.clone();
 
-            if watching == Channel::default() {
-                drop(watching);
-                sleep(Duration::from_secs(STREAM_SLEEP)).await;
-                continue;
-            }
+        let mut watching = rx.recv().await.unwrap();
+        loop {
+            match rx.try_recv() {
+                Ok(channel) => watching = channel,
+                Err(TryRecvError::Closed) => tracing::error!("Closed"),
+                Err(_) => {}
+            };
 
             if old_stream_name.is_empty() || old_stream_name != watching.channel_login {
                 info!("Now actively watching channel {}", watching.channel_login);
@@ -141,6 +148,7 @@ async fn watch_sync (client: Arc<TwitchClient>) {
                 if let Some(id) = stream.stream {
                     stream_id = id.id
                 } else {
+                    notify.notify_one();
                     sleep(Duration::from_secs(STREAM_SLEEP)).await;
                     continue;
                 }
@@ -148,11 +156,9 @@ async fn watch_sync (client: Arc<TwitchClient>) {
 
             match client.send_watch(&watching.channel_login, &stream_id, &watching.channel_id).await {
                 Ok(_) => {
-                    drop(watching);
                     sleep(Duration::from_secs(STREAM_SLEEP)).await
                 },
                 Err(e) => {
-                    drop(watching);
                     tracing::error!("{e}");
                     sleep(Duration::from_secs(STREAM_SLEEP)).await;
                 }
@@ -161,7 +167,7 @@ async fn watch_sync (client: Arc<TwitchClient>) {
     });
 }
 
-async fn drop_sync (client: Arc<TwitchClient>, tx: Sender<String>, cash_path: PathBuf) {
+async fn drop_sync (client: Arc<TwitchClient>, tx: Sender<String>, cash_path: PathBuf, mut rx_watch: broadcast::Receiver<Channel>, notify: Arc<Notify>) {
     tokio::spawn(async move {
         let mut end_time = Instant::now() + Duration::from_secs(60*60);
         let mut old_drop = String::new();
@@ -176,29 +182,41 @@ async fn drop_sync (client: Arc<TwitchClient>, tx: Sender<String>, cash_path: Pa
         } else {
             let mut cash = DROP_CASH.lock().await;
             let cash_str = retry!(fs::read_to_string(&cash_path));
-            let cash_vec: Vec<String> = serde_json::from_str(&cash_str).unwrap();  
+            let cash_vec: HashSet<String> = serde_json::from_str(&cash_str).unwrap();  
             *cash = cash_vec;
             drop(cash);
         }
 
         let tolerance = Duration::from_secs(5 * 60);
+
+        let mut count = 0;
+
+        let mut watching = rx_watch.recv().await.unwrap();
         loop {
-            let watching = NOW_WATCHED.lock().await.clone();
-            debug!("Lock watching in drop");
-
-            if watching == Channel::default() {
-                sleep(Duration::from_secs(30)).await;
-                continue;
+            match rx_watch.try_recv() {
+                Ok(new_watch) => {
+                    count = 0;
+                    watching = new_watch
+                },
+                Err(TryRecvError::Closed) => break,
+                Err(_) => {}
             }
-
             let mut cash = DROP_CASH.lock().await;
 
             let drop_progress = retry!(client.get_current_drop_progress_on_channel(&watching.channel_login, &watching.channel_id));
-            drop(watching);
-            if drop_progress.currentMinutesWatched == 0 {
-                drop(cash);
-                sleep(Duration::from_secs(30)).await;
-                continue;
+
+            if drop_progress.dropID.is_empty() {
+                count += 1;
+                if count >= MAX_COUNT {
+                    drop(cash);
+                    notify.notify_one();
+                    count = 0;
+                    continue;
+                } else {
+                    drop(cash);
+                    sleep(Duration::from_secs(5)).await;
+                    continue;
+                }
             }
 
             if old_drop.is_empty() {
@@ -211,7 +229,7 @@ async fn drop_sync (client: Arc<TwitchClient>, tx: Sender<String>, cash_path: Pa
                 retry!(claim_drop(&client, &old_drop));
                 info!("Drop claimed: {}", old_drop);
                 tx.send(old_drop.to_string()).unwrap();
-                cash.push(old_drop.to_string());
+                cash.insert(old_drop.to_string());
                 old_drop = drop_progress.dropID.to_string();
                 need_update = true;
 
@@ -251,8 +269,14 @@ async fn claim_drop (client: &Arc<TwitchClient>, drop_progress_id: &str) -> Resu
             for time_based in in_progress.timeBasedDrops {
                 if time_based.id == drop_progress_id {
                     if let Some(id) = time_based.self_drop.dropInstanceID {
-                        retry!(client.claim_drop(&id));
-                        return Ok(());
+                        loop {
+                            match client.claim_drop(&id).await {
+                            Ok(_) => return Ok(()),
+                            Err(twitch_gql_rs::error::TwitchError::DropAlreadyClaimed) => return Ok(()),
+                            Err(e) => tracing::error!("{e}")
+                            }
+                            sleep(Duration::from_secs(5)).await
+                        }
                     }
                 }
             }
