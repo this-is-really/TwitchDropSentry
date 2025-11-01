@@ -2,9 +2,9 @@
 
 > [!NOTE]
 >
-> ### 🚀 Release Candidate Notice ($\mathbf{0.3.0}$)
+> ### 🚀 Release Candidate Notice (**0.3.0**)
 >
-> This is a **Release Candidate** ($\mathbf{0.3.0}$). The major feature set is **complete**, and all critical bugs found during the Beta phase have been fixed.
+> This is a **Release Candidate (0.3.0)**. The major feature set is **complete**, and all critical bugs found during the Beta phase have been fixed.
 >
 > Your main purpose in testing this version is to:
 >
@@ -23,7 +23,7 @@
 
 This is a command-line tool designed to automatically watch Twitch streams and claim Time-Based Drops for a selected game.
 
-It runs in the background, finds eligible streams, simulates watch time by sending the necessary $\text{GQL}$ events, and automatically claims drops as they become available.
+It runs in the background, finds eligible streams, simulates watch time by sending the necessary **GQL** events, and automatically claims drops as they become available.
 
 ### How it Works
 
@@ -39,8 +39,8 @@ It runs in the background, finds eligible streams, simulates watch time by sendi
 
 Standard pre-compiled binaries are provided for common platforms.
 
-* **Windows:** Executable for **x86\_64** architecture (**$\text{.exe}$** file).
-* **Linux:** **$\text{ELF}$** executable for **x86\_64** architecture.
+* **Windows:** Executable for **x86_64** architecture (**.exe** file).
+* **Linux:** **ELF** executable for **x86_64** architecture.
 
 ## 🐞 Found a Bug?
 
