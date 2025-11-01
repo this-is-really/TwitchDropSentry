@@ -1,10 +1,10 @@
-# 🚀 Drop_Sentry (0.2.0 Beta) Release Notes
+# 🚀 Release Candidate (0.3.0)
 
 > [!NOTE]
 >
-> ### 🚀 Beta Release Notice ($\mathbf{0.2.0}$)
+> ### 🚀 Release Candidate Notice ($\mathbf{0.3.0}$)
 >
-> This is a **Beta release** ($\mathbf{0.2.0}$). The major feature set is **complete**, and I have fixed most critical bugs found during the Alpha phase.
+> This is a **Release Candidate** ($\mathbf{0.3.0}$). The major feature set is **complete**, and all critical bugs found during the Beta phase have been fixed.
 >
 > Your main purpose in testing this version is to:
 >
@@ -12,9 +12,10 @@
 > * Evaluate **usability** and overall user experience.
 > * Test the application under **real-world conditions**.
 >
-> While this version is significantly more stable than Alpha, it may still contain bugs that could affect data or performance. **Do not use this version for critical production data.**
+> While this build is **practically ready for production**, it is still a pre-release and may contain issues that affect data or performance. **Do not use this version for critical production data.**
 >
 > **Thank you for your feedback!**
+>
 
 ---
 
@@ -43,7 +44,7 @@ Standard pre-compiled binaries are provided for common platforms.
 
 ## 🐞 Found a Bug?
 
-Bugs were common during the Alpha stage, but this **Beta release is significantly more stable**. We've fixed most critical issues, and you might have to try hard now to find the remaining errors.
+Bugs were common during the Alpha stage, but this **Release Candidate is significantly more stable**. All critical issues found during the Beta phase have been fixed, and any remaining problems should be minor.
 
 If you still encounter *any* crashes, errors, or unexpected behavior, please **open an Issue** in this repository.
 
