@@ -26,11 +26,14 @@ pub async fn filter_streams (client: Arc<TwitchClient>, campaigns: Arc<Vec<DropC
             allow_channels.insert(campaign.id.to_string(), allow.clone());
             drop(allow_channels);
             for channel in allow {
-                if count >= MAX_TOPICS {
-                    break;
+                let stream_info = retry!(client.get_stream_info(&channel.name));
+                if stream_info.stream.is_some() {
+                    if count >= MAX_TOPICS {
+                        break;
+                    }
+                    video_vec.insert(Channel { channel_id: channel.id, channel_login: channel.name });
+                    count += 1
                 }
-                video_vec.insert(Channel { channel_id: channel.id, channel_login: channel.name });
-                count += 1
             }
         } else {
             let game_directory = retry!(client.get_game_directory(&campaign_details.game.slug, true));
@@ -39,11 +42,14 @@ pub async fn filter_streams (client: Arc<TwitchClient>, campaigns: Arc<Vec<DropC
             all_default.insert(campaign.id.to_string(), game_directory.clone());
             drop(all_default);
             for channel in game_directory {
+                let stream_info = retry!(client.get_stream_info(&channel.broadcaster.login));
                 if count >= MAX_TOPICS {
                     break;
                 }
-                video_vec.insert(Channel { channel_id: channel.broadcaster.id, channel_login: channel.broadcaster.login });
-                count += 1
+                if stream_info.stream.is_some() {
+                    video_vec.insert(Channel { channel_id: channel.broadcaster.id, channel_login: channel.broadcaster.login });
+                    count += 1
+                }
             }
         }
     }
@@ -55,31 +61,54 @@ pub async fn filter_streams (client: Arc<TwitchClient>, campaigns: Arc<Vec<DropC
 
     tokio::spawn(async move {
         loop {
-            let mut lock = CHANNEL_IDS.lock().await;
-            let mut count = lock.len();
+            let lock = CHANNEL_IDS.lock().await;
+            let count = lock.len();
+            drop(lock);
             if count < MAX_TOPICS {
-                let mut default_channels = DEFAULT_CHANNELS.lock().await;
+                let mut to_add = HashSet::new();
                 for campaign in campaigns.iter() {
-                    let slug = retry!(client.get_slug(&campaign.game.displayName));
-                    let game_directory = retry!(client.get_game_directory(&slug, true));
-                    let game_directory: HashSet<GameDirectory> = game_directory.into_iter().collect();
-                    default_channels.insert(campaign.id.clone(), game_directory.clone());
-
-                    for channel in game_directory {
-                        if count == MAX_TOPICS {
-                            break;
+                    let allow_channels = ALLOW_CHANNELS.lock().await;
+                    if let Some(channels) = allow_channels.get(&campaign.id) {
+                        for channel in channels {
+                            if to_add.len() + count  >= MAX_TOPICS {
+                                break;
+                            }
+                            let stream_info = retry!(client.get_stream_info(&channel.name));
+                            if stream_info.stream.is_some() {
+                                to_add.insert(Channel { channel_id: channel.id.clone(), channel_login: channel.name.clone() });
+                            }
                         }
-                        lock.insert(Channel { channel_id: channel.broadcaster.id.clone(), channel_login: channel.broadcaster.login.clone() });
-                        count += 1
+                    } else {
+                        let mut default_channels = DEFAULT_CHANNELS.lock().await;
+                        let slug = retry!(client.get_slug(&campaign.game.displayName));
+                        let game_directory = retry!(client.get_game_directory(&slug, true));
+                        let game_directory: HashSet<GameDirectory> = game_directory.into_iter().collect();
+                        default_channels.insert(campaign.id.clone(), game_directory.clone());
+                        for channel in &game_directory {
+                            to_add.insert(Channel { channel_id: channel.broadcaster.id.clone(), channel_login: channel.broadcaster.login.clone() });
+                            if to_add.len() + count  >= MAX_TOPICS {
+                                break;
+                            }
+                        }
+                        drop(default_channels);
                     }
-
-                    if count >= MAX_TOPICS {
+                    if to_add.len() + count >= MAX_TOPICS {
                         break;
                     }
+
                 }
-                drop(default_channels);
+
+                let mut lock = CHANNEL_IDS.lock().await;
+                let mut cur = lock.len();
+                for channel in to_add {
+                    if cur >= MAX_TOPICS { 
+                        break 
+                    };
+                    lock.insert(channel);
+                    cur += 1;
+                }
+                drop(lock);
             }
-            drop(lock);
             debug!("Drop ids");
             sleep(Duration::from_secs(UPDATE_TIME)).await
         }
@@ -97,14 +126,9 @@ async fn spawn_ws (auth_token: String) {
                 let mut channel_ids = CHANNEL_IDS.lock().await;
                 let new_channels: Vec<Channel> = channel_ids.iter().filter(|id| !send_channels.contains(*id)).cloned().collect();
                 let delete_channels: Vec<Channel> = send_channels.iter().filter(|id| !channel_ids.contains(&id)).cloned().collect();
-                let mut topics = Vec::new();
-                let mut delete_topics = Vec::new();
 
                 if !new_channels.is_empty() {
-                    for new in new_channels {
-                        topics.push(format!("video-playback-by-id.{}", new.channel_id));
-                        send_channels.insert(new);
-                    }
+                    let topics: Vec<String> = new_channels.iter().map(|channel| format!("video-playback-by-id.{}", channel.channel_id)).collect();
                     let payload = json!({
                         "type": "LISTEN",
                         "data": {
@@ -115,13 +139,11 @@ async fn spawn_ws (auth_token: String) {
                     let payload = serde_json::to_string(&payload).unwrap();
                     let payload = tokio_tungstenite::tungstenite::Message::Text(payload.into());
                     write.send(payload).await.unwrap_or_else(|e| tracing::error!("Failed to send payload to WebSocket: {e}"));
+                    send_channels.extend(new_channels);
                 }
 
                 if !delete_channels.is_empty() {
-                    for delete in delete_channels {
-                        delete_topics.push(format!("video-playback-by-id.{}", delete.channel_id));
-                        send_channels.remove(&delete);
-                    }
+                    let delete_topics: Vec<String> = delete_channels.iter().map(|channel| format!("video-playback-by-id.{}", channel.channel_id)).collect();
                     let payload = json!({
                         "type": "UNLISTEN",
                         "data": {
@@ -132,6 +154,9 @@ async fn spawn_ws (auth_token: String) {
                     let payload = serde_json::to_string(&payload).unwrap();
                     let payload = tokio_tungstenite::tungstenite::Message::Text(payload.into());
                     write.send(payload).await.unwrap_or_else(|e| tracing::error!("Failed to send payload to WebSocket: {e}"));
+                    for delete in delete_channels {
+                        send_channels.remove(&delete);
+                    }
                 };
 
                 if let Some(msg) = read.next().await {
@@ -151,7 +176,17 @@ async fn spawn_ws (auth_token: String) {
                                 let message = check_json(&data, "message").unwrap_or_else(|e| {tracing::error!("{e}"); &Value::Null}).as_str().unwrap_or_default();
                                 let topic = check_json(data, "topic").unwrap_or_else(|e| { tracing::error!("{e}"); &Value::Null }).as_str().unwrap_or_default();
                                 let message_json: Value = serde_json::from_str(&message).unwrap();
-                                if let None = message_json.get("viewers").and_then(|s| s.as_u64()) {
+                                if let Some(viewers) = message_json.get("viewers").and_then(|s| s.as_u64()) {
+                                    if viewers == 0 {
+                                        if let Some(id_str) = topic.split('.').last() {
+                                            let channel_id_to_remove = channel_ids.iter().find(|channel| channel.channel_id == id_str).cloned();
+                                            if let Some(to_remove) = channel_id_to_remove {
+                                                channel_ids.remove(&to_remove);
+                                            }
+                                            send_channels.retain(|channel| channel.channel_id != id_str );
+                                        }
+                                    }
+                                } else {
                                     if let Some(id_str) = topic.split('.').last() {
                                         let channel_id_to_remove = channel_ids.iter().find(|channel| channel.channel_id == id_str).cloned();
                                         if let Some(to_remove) = channel_id_to_remove {
@@ -194,7 +229,7 @@ struct Priority {
 
 impl Ord for Priority {
     fn cmp (&self, other: &Self) -> std::cmp::Ordering {
-        other.priority.cmp(&self.priority)
+        other.priority.cmp(&other.priority)
     }
 }
 
@@ -297,15 +332,23 @@ pub async fn update_stream (campaigns: Arc<Vec<DropCampaigns>>, tx_now_watch: Se
                         debug!("{}", drop_id.id);
                         if let Some(allow) = allow_channels.get(&drop_id.id) {
                                 if let Some(channel_allow) = allow.iter().find(|s| s.id == *channel.channel_id) {
+                                    let channel = Channel { channel_id: channel_allow.id.clone(), channel_login: channel_allow.name.clone() };
+                                    if !channel_ids.contains(&channel) {
+                                        heap.push(Priority { priority: 1, name: channel.clone() });
+                                    }
                                     debug!("Allow {}", channel_allow.name);
-                                    heap.push(Priority { priority: 2, name: Channel { channel_id: channel_allow.id.clone(), channel_login: channel_allow.name.clone() } });
+                                    heap.push(Priority { priority: 3, name: channel });
                                 }
                         }
 
                         if let Some(default) = default_channels.get(&drop_id.id) {
                             if let Some(channel_default) = default.iter().find(|s| s.broadcaster.id == *channel.channel_id) {
                                 debug!("Default {}", channel_default.broadcaster.login);
-                                heap.push(Priority { priority: 1, name: Channel { channel_id: channel_default.broadcaster.id.clone(), channel_login: channel_default.broadcaster.login.clone() } });
+                                let channel = Channel { channel_id: channel_default.broadcaster.id.clone(), channel_login: channel_default.broadcaster.login.clone() };
+                                if !channel_ids.contains(&channel) {
+                                    heap.push(Priority { priority: 0, name: channel.clone() });
+                                }
+                                heap.push(Priority { priority: 2, name: channel });
                             }
                         }
 
