@@ -2,7 +2,7 @@
 
 > [!NOTE]
 >
-> ### 🚀 Release Candidate Notice (**0.3.0**)
+> ## 🚀 Release Candidate Notice (**0.3.0**)
 >
 > This is a **Release Candidate (0.3.0)**. The major feature set is **complete**, and all critical bugs found during the Beta phase have been fixed.
 >

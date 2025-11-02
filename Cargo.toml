@@ -1,6 +1,6 @@
 [package]
 name = "twitchdrops_miner"
-version = "0.3.1-rc.1"
+version = "0.3.2-rc.2"
 edition = "2024"
 description = "Automatically watches Twitch streams and claims Time-Based Drops for selected games"
 license = "MIT"

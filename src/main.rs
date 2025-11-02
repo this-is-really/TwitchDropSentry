@@ -208,24 +208,6 @@ async fn drop_sync (client: Arc<TwitchClient>, tx: Sender<String>, cash_path: Pa
 
             let drop_progress = retry!(client.get_current_drop_progress_on_channel(&watching.channel_login, &watching.channel_id));
 
-            if drop_progress.dropID.is_empty() {
-                count += 1;
-                if count >= MAX_COUNT {
-                    drop(cash);
-                    notify.notify_one();
-                    count = 0;
-                    continue;
-                } else {
-                    drop(cash);
-                    sleep(Duration::from_secs(5)).await;
-                    continue;
-                }
-            }
-
-            if old_drop.is_empty() {
-                old_drop = drop_progress.dropID.to_string()
-            }
-
             let mut need_update = false;
 
             if end_time <= Instant::now() || old_drop != drop_progress.dropID && !cash.contains(&drop_progress.dropID) {
@@ -239,7 +221,25 @@ async fn drop_sync (client: Arc<TwitchClient>, tx: Sender<String>, cash_path: Pa
                 let cash_string_writer = serde_json::to_string_pretty(&cash.clone()).unwrap();
                 retry!(fs::write(&cash_path, cash_string_writer.clone()))
             }
+
+            if drop_progress.dropID.is_empty() {
+                count += 1;
+                if count >= MAX_COUNT {
+                    drop(cash);
+                    notify.notify_one();
+                    count = 0;
+                    continue;
+                } else {
+                    drop(cash);
+                    sleep(Duration::from_secs(5)).await;
+                    continue;
+                }
+            }
             drop(cash);
+
+            if old_drop.is_empty() {
+                old_drop = drop_progress.dropID.to_string()
+            }
 
 
             if bar.length().unwrap_or(0) == 1 {
