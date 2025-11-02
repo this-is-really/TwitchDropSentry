@@ -3,6 +3,8 @@ use std::{collections::{BTreeMap, HashMap, HashSet}, error::Error, path::{Path, 
 use indicatif::{ProgressBar, ProgressStyle};
 use tokio::{fs, sync::{Notify, broadcast::{self, Receiver, error::{TryRecvError}}, watch::Sender}, time::{Instant, sleep}};
 use tracing::{info};
+use tracing_appender::rolling;
+use tracing_subscriber::fmt::writer::BoxMakeWriter;
 use twitch_gql_rs::{TwitchClient, client_type::ClientType, structs::{DropCampaigns}};
 
 use crate::{r#static::{Channel, DROP_CASH, retry_backup}, stream::{filter_streams, update_stream}};
@@ -29,7 +31,8 @@ async fn create_client (home_dir: &Path) -> Result<TwitchClient, Box<dyn Error>>
 
 #[tokio::main]
 async fn main () -> Result<(), Box<dyn Error>> {
-    tracing_subscriber::fmt().with_max_level(tracing::Level::INFO).init();
+    let file_appender = rolling::never(".", "app.log");
+    tracing_subscriber::fmt().with_writer(BoxMakeWriter::new(file_appender)).with_ansi(false).init();
     let home_dir = Path::new("data");
     if !home_dir.exists() {
         fs::create_dir_all(&home_dir).await?;
