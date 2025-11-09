@@ -1,11 +1,12 @@
-name: Discord Notif
+name: Discord Notification
 on:
+  workflow_dispatch:
   release:
     types: [published]
 
 jobs:
   testing:
-    name: Testing
+    name: Discord Notification
     runs-on: ubuntu-18.04
     steps:
       - name: Send notification to Discord
