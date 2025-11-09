@@ -4,13 +4,17 @@ on:
     types: [published]
 
 jobs:
-  notify-discord:
-    runs-on: ubuntu-latest
+  testing:
+    name: Testing
+    runs-on: ubuntu-18.04
     steps:
-      - name: Send Discord notification
-        uses: sebastianpopp/discord-action@v2.0
+      - name: Send start notification to Discord
+        uses: appleboy/discord-action@master
         with:
-          webhook: ${{ secrets.DISCORD_WEBHOOK }}
+          webhook_id: ${{ secrets.DISCORD_WEBHOOK_ID_1 }}
+          webhook_token: ${{ secrets.DISCORD_WEBHOOK_TOKEN_1 }}
+          color: "#8b9b9c"
+          username: "GitHub Bot"
           message: |
             🚀 New release published by ${{ github.actor }}
             Release: ${{ github.event.release.name }}
