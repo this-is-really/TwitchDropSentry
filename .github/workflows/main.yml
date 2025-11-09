@@ -1,0 +1,19 @@
+name: Discord Notification
+on:
+  release:
+    types: [published]
+
+jobs:
+  notify-discord:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Discord notification
+        uses: sebastianpopp/discord-action@v2.0
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK }}
+          message: |
+            🚀 New release published by ${{ github.actor }}
+            Release: ${{ github.event.release.name }}
+            Tag: ${{ github.event.release.tag_name }}
+            Description: ${{ github.event.release.body }}
+            Check it out: ${{ github.event.release.html_url }}
