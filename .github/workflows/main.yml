@@ -15,12 +15,15 @@ jobs:
             webhook_id: ${{ secrets.DISCORD_WEBHOOK_ID_1 }}
             webhook_token: ${{ secrets.DISCORD_WEBHOOK_TOKEN_1 }}
             username: "GitHub Bot"
-            "color": 9123456
-            embeds: |
-              [{
-                "title": "New release published",
-                "description": "Release: ${{ github.event.release.name }}\nTag: ${{ github.event.release.tag_name }}\nDescription: ${{ github.event.release.body }}",
-                "url": "${{ github.event.release.html_url }}",
-                "color": 9123456
-              }]
+            color: 9123456
+            message: |
+              message: |
+                  **New release published!**
+                  **Author:** ${{ github.actor }}
+                  **Release:** ${{ github.event.release.name }}
+                  **Tag:** ${{ github.event.release.tag_name }}
+                  **Description:** 
+                   ${{ github.event.release.body }}
+                  🔗 [View Release](${{ github.event.release.html_url }})
+            
 
