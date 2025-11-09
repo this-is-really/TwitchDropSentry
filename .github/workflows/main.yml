@@ -9,14 +9,15 @@ jobs:
     runs-on: ubuntu-18.04
     steps:
       - name: Send start notification to Discord
-        uses: appleboy/discord-action@master
+        uses: appleboy/discord-action@v1.0.0
         with:
             webhook_id: ${{ secrets.DISCORD_WEBHOOK_ID_1 }}
             webhook_token: ${{ secrets.DISCORD_WEBHOOK_TOKEN_1 }}
             username: "GitHub Bot"
+            "color": 9123456
             embeds: |
               [{
-                "title": "🚀 New release published",
+                "title": "New release published",
                 "description": "Release: ${{ github.event.release.name }}\nTag: ${{ github.event.release.tag_name }}\nDescription: ${{ github.event.release.body }}",
                 "url": "${{ github.event.release.html_url }}",
                 "color": 9123456
