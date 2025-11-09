@@ -1,4 +1,4 @@
-name: Discord Notification
+name: Discord Notif
 on:
   release:
     types: [published]
@@ -8,7 +8,7 @@ jobs:
     name: Testing
     runs-on: ubuntu-18.04
     steps:
-      - name: Send start notification to Discord
+      - name: Send notification to Discord
         uses: appleboy/discord-action@v1.0.0
         with:
             webhook_id: ${{ secrets.DISCORD_WEBHOOK_ID_1 }}
