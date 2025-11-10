@@ -18,7 +18,7 @@
 >
 
 ---
-[![Discord](https://img.shields.io/discord/1437005378750775359?style=for-the-badge&logo=discord)](https://discord.gg/XstyJRHTWH)
+[![Discord](https://img.shields.io/discord/1437005378750775359?style=for-the-badge&logo=discord)](https://discord.gg/7H7n4RPtJG)
 
 ## What is this?
 
