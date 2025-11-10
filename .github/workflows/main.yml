@@ -28,29 +28,6 @@ jobs:
               **Description:**
               ${{ github.event.release.body }}
               🔗 ${{ github.event.release.html_url }}
-
-  commit:
-      name: Commit Notification
-      runs-on: ubuntu-22.04
-      if: ${{ github.event_name == 'push' }}
-      steps:
-        - name: Checkout repository
-          uses: actions/checkout@v4
-
-        - name: Send commit notification to Discord
-          uses: appleboy/discord-action@master
-          with:
-            webhook_id: ${{ secrets.DISCORD_WEBHOOK_ID_2 }}
-            webhook_token: ${{ secrets.DISCORD_WEBHOOK_TOKEN_2 }}
-            username: "GitHub Commit Bot"
-            color: "#42a5f5"
-            debug: true
-            message: |
-              **New commit pushed**
-              **Author:** ${{ github.event.head_commit.author.name }} (${{ github.event.head_commit.author.email }})
-              **Pusher:** ${{ github.actor }}
-              **Branch:** ${{ github.ref_name }}
-              **Commit SHA:** ${{ github.sha }}
               **Message:**
               ${{ github.event.head_commit.message }}
               🔗 Compare: ${{ github.event.compare }}
