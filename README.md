@@ -38,10 +38,20 @@ It runs in the background, finds eligible streams, simulates watch time by sendi
 
 ## 💻 Available Binaries
 
-Standard pre-compiled binaries are provided for common platforms.
+Precompiled binaries are available for the most common platforms:
 
-* **Windows:** Executable for **x86_64** architecture (**.exe** file).
-* **Linux:** **ELF** executable for **x86_64** architecture.
+* **Windows**  
+  Native executable (`.exe`) for **x86_64**
+
+* **Linux**  
+  ELF binary for **x86_64**
+
+* **Docker 🐳**  
+  A community-maintained Docker image is available.  
+  Maintained by [@Addison-Usc](https://github.com/Addison-Usc).
+
+  Repository:  
+  <https://github.com/Addison-Usc/TwitchDropBot>
 
 ## 🐞 Found a Bug?
 
