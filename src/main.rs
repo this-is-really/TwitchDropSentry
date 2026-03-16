@@ -20,9 +20,33 @@ async fn create_client (home_dir: &Path) -> Result<TwitchClient, Box<dyn Error>>
     if !path.exists() {
         let client_type = ClientType::android_app();
         let mut client = TwitchClient::new(&client_type).await?;
-        let get_auth = client.request_device_auth().await?;
-        println!("{}", get_auth.verification_uri);
-        client.auth(get_auth).await?;
+
+        let mut count = 0;
+        loop {
+            count += 1;
+
+            if count >= MAX_COUNT {
+                tracing::warn!("Authentication failed: maximum retry attempts ({MAX_COUNT}) reached.");
+                break;
+            }
+
+            info!("Starting Twitch device authentication (attempt {count}/{MAX_COUNT})");
+
+            let get_auth = client.request_device_auth().await?;
+            println!("To authenticate, open the following URL in your browser:\n{}", get_auth.verification_uri);
+            match client.auth(get_auth).await {
+                Ok(_) => break,
+                Err(twitch_gql_rs::error::AuthError::DeviceTokenExpired) => {
+                    tracing::warn!("Device authentication token expired. Requesting a new one (attempt {count}/{MAX_COUNT})...");
+                    continue
+                },
+                Err(twitch_gql_rs::error::AuthError::TwitchError(e)) => {
+                    tracing::error!("Twitch returned an error during authentication: {e}");
+                    break;
+                }
+            }
+        }
+        
         client.save_file(&path).await?;
     }
     let client = TwitchClient::load_from_file(&path).await?;
