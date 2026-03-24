@@ -131,11 +131,11 @@ pub async fn filter_streams (client: Arc<TwitchClient>, campaigns: Arc<Vec<DropC
 async fn spawn_ws (auth_token: String) {
     tokio::spawn(async move {
         loop {
-            let mut send_channels: HashSet<Channel> = HashSet::new();
             let (ws_stream, _) = retry!(connect_async(WS_URL));
             let (mut write, mut read) = ws_stream.split();
+            let mut send_channels: HashSet<Channel> = HashSet::new();
             loop {
-                let mut channel_ids = CHANNEL_IDS.lock().await;
+                let channel_ids = CHANNEL_IDS.lock().await;
                 let new_channels: Vec<Channel> = channel_ids.iter().filter(|id| !send_channels.contains(*id)).cloned().collect();
                 let delete_channels: Vec<Channel> = send_channels.iter().filter(|id| !channel_ids.contains(&id)).cloned().collect();
 
@@ -179,10 +179,11 @@ async fn spawn_ws (auth_token: String) {
                                 write.send(pong).await.unwrap();
                             }
                             let json: Value = serde_json::from_str(&text).unwrap();
-                            if let Some(err) = json.get("error") {
-                                if err != "" {
+                            if let Some(err) = json.get("error").and_then(|e| e.as_str()) {
+                                if !err.is_empty() {
                                     tracing::error!("{err}")
                                 }
+                                continue;
                             } else {
                                 let data = check_json(&json, "data").unwrap_or_else(|e| {tracing::error!("{e}"); &Value::Null});
                                 let message = check_json(&data, "message").unwrap_or_else(|e| {tracing::error!("{e}"); &Value::Null}).as_str().unwrap_or_default();
@@ -191,8 +192,8 @@ async fn spawn_ws (auth_token: String) {
                                 if let Some(viewers) = message_json.get("viewers").and_then(|s| s.as_u64()) {
                                     if viewers == 0 {
                                         if let Some(id_str) = topic.split('.').last() {
-                                            let channel_id_to_remove = channel_ids.iter().find(|channel| channel.channel_id == id_str).cloned();
-                                            if let Some(to_remove) = channel_id_to_remove {
+                                            let mut channel_ids = CHANNEL_IDS.lock().await;
+                                            if let Some(to_remove) = channel_ids.iter().find(|channel| channel.channel_id == id_str).cloned() {
                                                 channel_ids.remove(&to_remove);
                                             }
                                             send_channels.retain(|channel| channel.channel_id != id_str );
@@ -200,10 +201,10 @@ async fn spawn_ws (auth_token: String) {
                                     }
                                 } else {
                                     if let Some(id_str) = topic.split('.').last() {
-                                        let channel_id_to_remove = channel_ids.iter().find(|channel| channel.channel_id == id_str).cloned();
-                                        if let Some(to_remove) = channel_id_to_remove {
+                                        let mut channel_ids = CHANNEL_IDS.lock().await;
+                                        if let Some(to_remove) = channel_ids.iter().find(|channel| channel.channel_id == id_str).cloned() {
                                             channel_ids.remove(&to_remove);
-                                        }
+                                        };
                                         send_channels.retain(|channel| channel.channel_id != id_str );
                                     }
                                 }
@@ -338,6 +339,7 @@ pub async fn update_stream (campaigns: Arc<Vec<DropCampaigns>>, tx_now_watch: Se
                 heap = new_heap
             }
             if !added_channels.is_empty() {
+                heap.clear();
                 for drop_id in campaigns.iter() {
                     for channel in &channel_ids {
                         debug!("{}", channel.channel_id);
@@ -366,8 +368,8 @@ pub async fn update_stream (campaigns: Arc<Vec<DropCampaigns>>, tx_now_watch: Se
 
                     } 
                 }
-                old_channel_ids = channel_ids
             }
+            old_channel_ids = channel_ids;
             tx.send(heap.clone()).unwrap();
             sleep(Duration::from_secs(UPDATE_TIME)).await;
         }

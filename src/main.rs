@@ -1,7 +1,7 @@
 use std::{collections::{BTreeMap, HashMap, HashSet}, error::Error, path::{Path, PathBuf}, sync::Arc, time::Duration};
 
 use indicatif::{ProgressBar, ProgressStyle};
-use tokio::{fs, sync::{Notify, broadcast::{self, Receiver, error::{TryRecvError}}, watch::Sender}, time::{Instant, sleep}};
+use tokio::{fs, sync::{Notify, broadcast::{self, Receiver, error::{TryRecvError}}, watch::Sender}, time::{sleep}};
 use tracing::{info};
 use tracing_appender::rolling;
 use tracing_subscriber::fmt::writer::BoxMakeWriter;
@@ -122,28 +122,24 @@ async fn main_logic (client: Arc<TwitchClient>, grouped: BTreeMap<usize, Vec<Dro
 
             let drop_ids_cache = DROP_CASH.lock().await.clone();    
             for drop_id_cache in drop_ids_cache {
-                let deleted_time_based = campaign_details.timeBasedDrops.iter().filter(|time_based| time_based.id == drop_id_cache).map(|time_based| time_based.id.clone()).collect::<Vec<String>>();
-                for delete in deleted_time_based {
-                    if let Some(pos) = campaign_details.timeBasedDrops.iter().position(|time_based| time_based.id == delete) {
-                        campaign_details.timeBasedDrops.remove(pos);
-                    }
+                if let Some(pos) = campaign_details.timeBasedDrops.iter().position(|d| d.id == drop_id_cache) {
+                    campaign_details.timeBasedDrops.remove(pos);
                 }
             }
 
-            loop {
-                rx_watch.changed().await.unwrap();
-                let drop_id = rx_watch.borrow();
+            while !campaign_details.timeBasedDrops.is_empty() {
+                rx_watch.changed().await.ok();
+                let drop_id = rx_watch.borrow().clone();
                 if drop_id.is_empty() {
                     sleep(Duration::from_secs(10)).await;
                     continue;
                 }
-                if campaign_details.timeBasedDrops.is_empty() {
-                    break;
-                }
                 if let Some(pos) = campaign_details.timeBasedDrops.iter().position(|time_based| time_based.id == *drop_id) {
                     campaign_details.timeBasedDrops.remove(pos);
+                    info!("Drop {} processed for campaign {}", drop_id, campaign.game.displayName);
                 }
             }
+            info!("All drops for campaign {} are claimed!", campaign.game.displayName);
             
         }
     }
@@ -195,8 +191,8 @@ async fn watch_sync (client: Arc<TwitchClient>, mut rx: Receiver<Channel>, notif
 
 async fn drop_sync (client: Arc<TwitchClient>, tx: Sender<String>, cash_path: PathBuf, mut rx_watch: broadcast::Receiver<Channel>, notify: Arc<Notify>) {
     tokio::spawn(async move {
-        let mut end_time = Instant::now() + Duration::from_secs(60*60);
         let mut old_drop = String::new();
+            let mut last_claimed = String::new();
 
         //bar
         let bar = ProgressBar::new(1);
@@ -214,64 +210,45 @@ async fn drop_sync (client: Arc<TwitchClient>, tx: Sender<String>, cash_path: Pa
             drop(cash);
         }
 
-        let tolerance = Duration::from_secs(5 * 60);
-
-        let mut count = 0;
-
         let mut watching = rx_watch.recv().await.unwrap();
         loop {
             match rx_watch.try_recv() {
                 Ok(new_watch) => {
-                    count = 0;
-                    watching = new_watch
+                    watching = new_watch;
+                    last_claimed.clear();
                 },
                 Err(TryRecvError::Closed) => break,
                 Err(_) => {}
             }
-            let mut cash = DROP_CASH.lock().await;
 
+            let mut cash = DROP_CASH.lock().await;
             let drop_progress = retry!(client.get_current_drop_progress_on_channel(&watching.channel_login, &watching.channel_id));
 
-            if drop_progress.dropID.is_empty() {
-                count += 1;
-                if count >= MAX_COUNT {
-                    drop(cash);
-                    notify.notify_one();
-                    count = 0;
-                    continue;
-                } else {
-                    drop(cash);
-                    sleep(Duration::from_secs(5)).await;
-                    continue;
-                }
+            let should_claim = !drop_progress.dropID.is_empty() && drop_progress.currentMinutesWatched >= drop_progress.requiredMinutesWatched && drop_progress.dropID != last_claimed;
+
+            if should_claim {
+                retry!(claim_drop(&client, &drop_progress.dropID));
+                info!("Drop claimed: {}", drop_progress.dropID);
+
+                tx.send(drop_progress.dropID.clone()).unwrap_or_else(|_| tracing::error!("tx closed"));
+
+                cash.insert(drop_progress.dropID.clone());
+                
+                last_claimed = drop_progress.dropID.clone();
+                old_drop = drop_progress.dropID.clone();
+
+                let cash_string = serde_json::to_string_pretty(&*cash).unwrap();
+                retry!(fs::write(&cash_path, cash_string.as_bytes()));
             }
 
-            if old_drop.is_empty() {
-                old_drop = drop_progress.dropID.to_string()
-            }
-
-            let mut need_update = false;
-
-            if end_time <= Instant::now() || old_drop != drop_progress.dropID && !cash.contains(&drop_progress.dropID) {
-                retry!(claim_drop(&client, &old_drop));
-                info!("Drop claimed: {}", old_drop);
-                tx.send(old_drop.to_string()).unwrap();
-                cash.insert(old_drop.to_string());
-                old_drop = drop_progress.dropID.to_string();
-                need_update = true;
-
-                let cash_string_writer = serde_json::to_string_pretty(&cash.clone()).unwrap();
-                retry!(fs::write(&cash_path, cash_string_writer.clone()));
-                drop(cash);
-            }
+            drop(cash);
 
             bar.set_length(drop_progress.requiredMinutesWatched);
+            bar.set_message(format!("User: {}", client.login.clone().unwrap_or_default()));
             bar.set_position(drop_progress.currentMinutesWatched);
-            bar.set_message(format!("DropID: {}", drop_progress.dropID));
 
-            if end_time <= Instant::now() + tolerance || Instant::now() <= end_time + tolerance && need_update  {
-                let reaming = drop_progress.requiredMinutesWatched.saturating_sub(drop_progress.currentMinutesWatched);
-                end_time = Instant::now() + Duration::from_secs(reaming * 60);
+            if drop_progress.dropID.is_empty() || drop_progress.currentMinutesWatched >= drop_progress.requiredMinutesWatched {
+                notify.notify_one();
             }
 
             sleep(Duration::from_secs(30)).await;
