@@ -12,7 +12,7 @@ use twitch_gql_rs::{TwitchClient, structs::{Channels, DropCampaigns, GameDirecto
 use crate::{retry, r#static::{ALLOW_CHANNELS, CHANNEL_IDS, Channel, DEFAULT_CHANNELS, retry_backup}};
 
 const UPDATE_TIME: u64 = 15;
-const MAX_TOPICS: usize = 50;
+const MAX_TOPICS: usize = 40;
 const WS_URL: &'static str = "wss://pubsub-edge.twitch.tv/v1";
 
 pub async fn filter_streams (client: Arc<TwitchClient>, campaigns: Arc<Vec<DropCampaigns>>) {

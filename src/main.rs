@@ -249,7 +249,7 @@ async fn drop_sync (client: Arc<TwitchClient>, tx: Sender<String>, cash_path: Pa
         //bar
         let bar = ProgressBar::new(1);
         bar.set_style(ProgressStyle::with_template("[{bar:40.cyan/blue}] {percent:.1}% ({pos}/{len} min) {msg}").unwrap());
-        bar.set_message("Initialization...");
+        bar.set_message("Starting drop tracker...");
         bar.enable_steady_tick(Duration::from_millis(500));
 
         if !cash_path.exists() {
@@ -263,11 +263,13 @@ async fn drop_sync (client: Arc<TwitchClient>, tx: Sender<String>, cash_path: Pa
         }
 
         let mut watching = rx_watch.recv().await.unwrap();
+        let mut last_drop_id = String::new();
         loop {
             match rx_watch.try_recv() {
                 Ok(new_watch) => {
                     watching = new_watch;
                     last_claimed.clear();
+                    last_drop_id.clear();
                 },
                 Err(TryRecvError::Closed) => break,
                 Err(_) => {}
@@ -294,7 +296,24 @@ async fn drop_sync (client: Arc<TwitchClient>, tx: Sender<String>, cash_path: Pa
 
             drop(cash);
 
-            bar.set_length(drop_progress.requiredMinutesWatched);
+            let message = if drop_progress.dropID.is_empty() {
+                "No active drop • waiting..."
+            } else if drop_progress.currentMinutesWatched >= drop_progress.requiredMinutesWatched {
+                "✅ Ready to claim!"
+            } else {
+                "Watching"
+            };
+
+            if drop_progress.dropID != last_drop_id {
+                last_drop_id = drop_progress.dropID.clone();
+                bar.set_position(0);
+                bar.set_length(drop_progress.requiredMinutesWatched.max(1));
+                bar.set_message(message);
+            } else {
+                bar.set_message(message);
+            }
+
+            bar.set_length(drop_progress.requiredMinutesWatched.max(1));
             bar.set_position(drop_progress.currentMinutesWatched);
 
             if drop_progress.dropID.is_empty() || drop_progress.currentMinutesWatched >= drop_progress.requiredMinutesWatched {
