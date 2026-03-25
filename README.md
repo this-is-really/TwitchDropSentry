@@ -1,76 +1,114 @@
-# 🚀 Release Candidate (0.3.0)
+# 🛡️ TwitchDropSentry
 
-> [!NOTE]
->
-> ## 🚀 Release Candidate Notice (**0.3.0**)
->
-> This is a **Release Candidate (0.3.0)**. The major feature set is **complete**, and all critical bugs found during the Beta phase have been fixed.
->
-> Your main purpose in testing this version is to:
->
-> * Find any remaining **minor bugs** and unexpected edge-cases.
-> * Evaluate **usability** and overall user experience.
-> * Test the application under **real-world conditions**.
->
-> While this build is **practically ready for production**, it is still a pre-release and may contain issues that affect data or performance. **Do not use this version for critical production data.**
->
-> **Thank you for your feedback!**
->
+[![Discord](https://img.shields.io/discord/1437005378750775359?style=for-the-badge&logo=discord)](https://discord.gg/7H7n4RPtJG)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Rust](https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org)
+
+**Automatically watches Twitch streams and farms Time-Based Drops for your chosen game.**
+
+TwitchDropSentry is a lightweight, reliable Rust CLI tool that logs into your Twitch account and emulates stream viewing via the official Twitch GQL API — so you can collect drops completely hands-free.
 
 ---
-[![Discord](https://img.shields.io/discord/1437005378750775359?style=for-the-badge&logo=discord)](https://discord.gg/7H7n4RPtJG)
 
-## What is this?
+## ✨ Key Features
 
-This is a command-line tool designed to automatically watch Twitch streams and claim Time-Based Drops for a selected game.
+- ✅ **Automatic login** — saves your session to `data/save.json`
+- ✅ **Smart campaign selection** — groups active Twitch Drops by game
+- ✅ **Priority streams** — finds and connects to the best live stream for the campaign
+- ✅ **Real viewing simulation** — sends proper GQL events (powered by [**twitch-gql-rs**](https://github.com/this-is-really/twitch-gql-rs))
+- ✅ **Live progress** — beautiful real-time terminal progress bar
+- ✅ **Auto-claim** — instantly claims drops with robust retry logic
+- ✅ **Progress tracking** — saves claimed drops to `data/cash.json`
+- ✅ **Autostart** — launches with your OS via `settings.json`
+- ✅ **Cross-platform** — ready-to-use binaries for Windows & Linux + Docker support
 
-It runs in the background, finds eligible streams, simulates watch time by sending the necessary **GQL** events, and automatically claims drops as they become available.
+## 🚀 Quick Start
 
-### How it Works
+1. Download the latest release from [Releases](https://github.com/this-is-really/TwitchDropSentry/releases)
+2. Run the executable
+3. Log in to your Twitch account
+4. Choose a game or configure `data/settings.json` for fully automatic operation
 
-1. Logs into your Twitch account (saves credentials to `data/save.json`).
-2. Fetches active Drop Campaigns and **groups them by game** to ask you to select one.
-3. Finds and prioritizes the **best eligible live stream** for that campaign.
-4. Simulates "watching" that stream. **Note:** The underlying **GQL** implementation is powered by [**twitch-gql-rs**](https://github.com/this-is-really/twitch-gql-rs).
-5. Monitors your drop progress with a **real-time terminal progress bar**.
-6. **Automatically claims** the drop once the required time is met, with robust retry logic.
-7. Saves claimed drops to `data/cash.json` to avoid re-claiming.
+## 📥 Installation
 
-## 💻 Available Binaries
+### Prebuilt Binaries
 
-Precompiled binaries are available for the most common platforms:
+| Platform      | File                     | Architecture |
+|---------------|--------------------------|--------------|
+| **Windows**   | `TwitchDropSentry.exe`   | x86_64       |
+| **Linux**     | `TwitchDropSentry`       | x86_64 ELF   |
 
-* **Windows**  
-  Native executable (`.exe`) for **x86_64**
+### Docker 🐳 (Community)
 
-* **Linux**  
-  ELF binary for **x86_64**
+Maintained by [@Addison-Usc](https://github.com/Addison-Usc):
 
-* **Docker 🐳**  
-  A community-maintained Docker image is available.  
-  Maintained by [@Addison-Usc](https://github.com/Addison-Usc).
+→ [Addison-Usc/TwitchDropBot](https://github.com/Addison-Usc/TwitchDropBot)
 
-  Repository:  
-  <https://github.com/Addison-Usc/TwitchDropBot>
+### Build from Source
+
+```bash
+git clone https://github.com/this-is-really/TwitchDropSentry.git
+cd TwitchDropSentry
+cargo build --release
+```
+
+(Rust toolchain required)
+
+## ⚙️ Settings (data/settings.json)
+
+Since version **0.3.5** you can fully automate the tool:
+
+```json
+{
+  "game": "Rust",
+  "autostart": true
+}
+```
+
+- `"game"` — game name (empty string `""` = interactive selection)
+- `"autostart": true` — start automatically on system boot
+
+## 🔍 How It Works
+
+1. Logs into Twitch and stores credentials in `data/save.json`
+2. Fetches all active Drop campaigns via GQL and groups them by game
+3. Finds the best eligible live stream
+4. Simulates watching by sending GQL events
+5. Shows real-time progress in the terminal
+6. Automatically claims the drop when time is reached
+7. Saves claimed drops to `data/cash.json`
+
+## ⚠️ Security Notice
+
+**Your credentials are stored in plain text** in `data/save.json` (username + token).  
+- Use the tool **only on trusted devices**.  
+- We strongly recommend creating a dedicated Twitch account just for farming drops.  
+- The developer is not responsible for any account issues.
 
 ## 🐞 Found a Bug?
 
-Bugs were common during the Alpha stage, but this **Release Candidate is significantly more stable**. All critical issues found during the Beta phase have been fixed, and any remaining problems should be minor.
+The project is in Release Candidate stage and very stable.  
+If anything breaks, please open an [Issue](https://github.com/this-is-really/TwitchDropSentry/issues) with your OS, version, and logs.
 
-If you still encounter *any* crashes, errors, or unexpected behavior, please **open an Issue** in this repository.
+## ⭐ Support the Project
 
-## 🎉 Did you like the app?
-
-Please consider rating this repository by clicking the star in the top-right corner of the page on GitHub (you need to be logged into your account). This gives me the motivation to keep developing this project.
-
-![Star](https://i.ibb.co/3YkyqJQ8/2025-10-31-20-25.png)
+If you like the tool, please give it a **star** on GitHub!  
+It’s the best motivation to keep improving it.
 
 ## ❤️ Support the Developer
 
 <div align="center">
+  <a href="https://www.donationalerts.com/r/this_is_really">
+    <img src="https://www.donationalerts.com/img/brand/donationalerts.svg" height="40">
+  </a>
+  <br><br>
+  <a href="https://boosty.to/this-is-really">Boosty</a>
+</div>
 
-[![DonationAlerts](https://www.donationalerts.com/img/brand/donationalerts.svg)](https://www.donationalerts.com/r/this_is_really)
+Your support helps bring new features faster and ensures long-term maintenance.
 
-[Boosty](https://boosty.to/this-is-really)
+---
 
-Your support will accelerate development and help ensure the long-term maintenance of this project.
+**Made with ❤️ for the Twitch community**  
+**License:** [MIT](LICENSE)  
+**Version:** 0.3.5 (Release Candidate 5)
