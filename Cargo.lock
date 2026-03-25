@@ -1768,9 +1768,9 @@ dependencies = [
 
 [[package]]
 name = "shell-words"
-version = "1.1.0"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24188a676b6ae68c3b2cb3a01be17fbf7240ce009799bb56d5b1409051e78fde"
+checksum = "dc6fe69c597f9c37bfeeeeeb33da3530379845f10be461a66d16d03eca2ded77"
 
 [[package]]
 name = "shlex"
@@ -2231,9 +2231,9 @@ dependencies = [
 
 [[package]]
 name = "twitch-gql-rs"
-version = "0.2.5"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d7bfb0a07edb1daad6cd1619416d1bca15861bf02debe0b295a5f4ff7bfa671"
+checksum = "2a1eaab5540cb4208cd6a6d9279ead1499248f04a376acd23a09a98f16d0bbfb"
 dependencies = [
  "base64",
  "rand",
