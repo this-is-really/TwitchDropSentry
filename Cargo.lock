@@ -318,6 +318,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
+name = "either"
+version = "1.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
+
+[[package]]
 name = "encode_unicode"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1473,6 +1479,7 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tokio-native-tls",
+ "tokio-socks",
  "tower",
  "tower-http",
  "tower-service",
@@ -2065,6 +2072,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-socks"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d4770b8024672c1101b3f6733eab95b18007dbe0847a8afe341fcf79e06043f"
+dependencies = [
+ "either",
+ "futures-util",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
 name = "tokio-tungstenite"
 version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2231,9 +2250,9 @@ dependencies = [
 
 [[package]]
 name = "twitch-gql-rs"
-version = "0.2.6"
+version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a1eaab5540cb4208cd6a6d9279ead1499248f04a376acd23a09a98f16d0bbfb"
+checksum = "5f29f89449b14d1a8f17a6e87152ce5d1bf77845135a85db21a97ebc74bdf4cd"
 dependencies = [
  "base64",
  "rand",
@@ -2248,7 +2267,7 @@ dependencies = [
 
 [[package]]
 name = "twitchdrops_miner"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "auto-launch",
  "dialoguer",

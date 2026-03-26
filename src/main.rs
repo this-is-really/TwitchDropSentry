@@ -7,7 +7,7 @@ use tokio::{fs, sync::{Notify, broadcast::{self, Receiver, error::{TryRecvError}
 use tracing::{info};
 use tracing_appender::rolling;
 use tracing_subscriber::fmt::writer::BoxMakeWriter;
-use twitch_gql_rs::{TwitchClient, client_type::ClientType, structs::{DropCampaigns}};
+use twitch_gql_rs::{TwitchClient, client_type::ClientType, error::SystemError, structs::DropCampaigns};
 
 use crate::{r#static::{Channel, DROP_CASH, retry_backup}, stream::{filter_streams, update_stream}};
 mod r#static;
@@ -17,11 +17,28 @@ const STREAM_SLEEP: u64 = 20;
 
 const MAX_COUNT: u64 = 3;
 
-async fn create_client (home_dir: &Path) -> Result<TwitchClient, Box<dyn Error>> {
+async fn create_client (home_dir: &Path, proxy_str: &str) -> Result<TwitchClient, Box<dyn Error>> {
     let path = home_dir.join("save.json");
+
+    let proxy = if proxy_str.is_empty() {
+        None
+    } else {
+        Some(proxy_str.to_string())
+    };
+
     if !path.exists() {
         let client_type = ClientType::android_app();
-        let mut client = TwitchClient::new(&client_type).await?;
+        let mut client = match TwitchClient::new(&client_type, proxy).await {
+            Ok(cl) => cl,
+            Err(SystemError::InvalidProxy { proxy_url, details }) => {
+                tracing::error!("❌ Failed to connect to proxy '{}': {}", proxy_url, details);
+                return Err(format!("Proxy error: {}", details).into());
+            },
+            Err(e) => {
+                tracing::error!("{e}");
+                return Err(e.into());
+            }
+        };
 
         let mut count = 0;
         loop {
@@ -58,7 +75,8 @@ async fn create_client (home_dir: &Path) -> Result<TwitchClient, Box<dyn Error>>
 #[derive(Debug, Serialize, Deserialize)]
 struct Settings {
     game: String,
-    autostart: bool
+    autostart: bool,
+    proxy: String
 }
 
 #[tokio::main]
@@ -70,7 +88,20 @@ async fn main () -> Result<(), Box<dyn Error>> {
         fs::create_dir_all(&home_dir).await?;
     }
 
-    let client = create_client(home_dir).await?;
+    let settings_path = home_dir.join("settings.json");
+    if !settings_path.exists() {
+        let settings = serde_json::to_string_pretty(&Settings { game: String::new(), autostart: false, proxy: String::new() })?;
+        fs::write(&settings_path, settings.as_bytes()).await?;
+    }
+
+    let settings: Settings = {
+        let content = fs::read_to_string(&settings_path).await?;
+        serde_json::from_str(&content)?
+    };
+
+    configure_autostart(&settings)?;
+
+    let client = create_client(home_dir, &settings.proxy).await?;
 
     let campaign = client.get_campaign().await?;
     let campaign = campaign.dropCampaigns;
@@ -92,7 +123,7 @@ async fn main () -> Result<(), Box<dyn Error>> {
         grouped.entry(idx).or_default().push(obj);
     }
 
-    main_logic(Arc::new(client), grouped, home_dir).await?;
+    main_logic(Arc::new(client), grouped, home_dir, &settings).await?;
     Ok(())
 }
 
@@ -119,20 +150,7 @@ fn configure_autostart (settings: &Settings) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn main_logic (client: Arc<TwitchClient>, grouped: BTreeMap<usize, Vec<DropCampaigns>>, home_dir: &Path) -> Result<(), Box<dyn Error>> {
-    let settings_path = home_dir.join("settings.json");
-    if !settings_path.exists() {
-        let settings = serde_json::to_string_pretty(&Settings { game: String::new(), autostart: false })?;
-        fs::write(&settings_path, settings.as_bytes()).await?;
-    }
-
-    let settings: Settings = {
-        let content = fs::read_to_string(&settings_path).await?;
-        serde_json::from_str(&content)?
-    };
-
-    configure_autostart(&settings)?;
-
+async fn main_logic (client: Arc<TwitchClient>, grouped: BTreeMap<usize, Vec<DropCampaigns>>, home_dir: &Path, settings: &Settings) -> Result<(), Box<dyn Error>> {
     let current_campaigns: Vec<DropCampaigns> = if !settings.game.is_empty() {
         grouped.values().flat_map(|campaign| {
             campaign.iter().filter(|c| c.game.displayName.to_lowercase() == settings.game.to_lowercase()).cloned()
@@ -167,7 +185,7 @@ async fn main_logic (client: Arc<TwitchClient>, grouped: BTreeMap<usize, Vec<Dro
     info!("Drop progress tracker is active");
     filter_streams(client.clone(), drop_campaigns.clone()).await;
     info!("Stream filtering has begun");
-    update_stream(drop_campaigns, tx, notify).await;
+    update_stream(tx, notify).await;
     info!("Stream priority updated");
 
     let mut pending_drops: HashSet<String> = HashSet::new();
