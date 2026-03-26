@@ -28,7 +28,7 @@ async fn create_client (home_dir: &Path, proxy_str: &str) -> Result<TwitchClient
 
     if !path.exists() {
         let client_type = ClientType::android_app();
-        let mut client = match TwitchClient::new(&client_type, proxy).await {
+        let mut client = match TwitchClient::new(&client_type, &proxy).await {
             Ok(cl) => cl,
             Err(SystemError::InvalidProxy { proxy_url, details }) => {
                 tracing::error!("❌ Failed to connect to proxy '{}': {}", proxy_url, details);
@@ -68,7 +68,8 @@ async fn create_client (home_dir: &Path, proxy_str: &str) -> Result<TwitchClient
         
         client.save_file(&path).await?;
     }
-    let client = TwitchClient::load_from_file(&path).await?;
+
+    let client = TwitchClient::load_from_file(&path, &proxy).await?;
     Ok(client)
 }
 
