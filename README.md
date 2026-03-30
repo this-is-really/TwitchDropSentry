@@ -3,6 +3,24 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org)
 
+---
+
+> [!WARNING]
+> **⚠️ PROJECT DEPRECATED - DEVELOPMENT MOVED**
+>
+> **This repository is no longer actively maintained.**
+>
+> I have decided to focus **all our efforts** on the multi-account version:
+>
+> 🔗 **[TwitchDropSentryMulti](https://github.com/this-is-really/TwitchDropSentryMulti)**
+>
+> If you are using only one account, I still strongly recommend switching to **TwitchDropSentryMulti** - it fully supports single-account mode (just add one account in the config) and will receive all future improvements, bug fixes, and new features.
+> 
+> Thank you for your support and understanding! ❤️  
+> All new development and community activity continues in the multi-account repository.
+
+---
+
 **Automatically watches Twitch streams and farms Time-Based Drops for your chosen game.**
 
 TwitchDropSentry is a lightweight, reliable Rust CLI tool that logs into your Twitch account and emulates stream viewing via the official Twitch GQL API - so you can collect drops completely hands-free.
